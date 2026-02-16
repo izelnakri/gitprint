@@ -1,0 +1,15 @@
+[package]
+name = "gitprint"
+version = "0.1.0"
+edition = "2024"
+description = "Convert git repositories into beautifully formatted, printer-friendly PDFs"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+content_inspector = "0.2"
+genpdfi = "0.2"
+globset = "0.4"
+thiserror = "2.0"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
