@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = gitprint::cli::Args::parse();
 
     if args.list_themes {
@@ -38,7 +39,7 @@ fn main() {
         landscape: args.landscape,
     };
 
-    if let Err(e) = gitprint::run(&config) {
+    if let Err(e) = gitprint::run(&config).await {
         eprintln!("error: {e}");
         std::process::exit(1);
     }

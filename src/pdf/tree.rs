@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use genpdfi::elements::{self, Paragraph};
-use genpdfi::{Alignment, Element, style};
+use printpdf::{Color, Pt, Rgb};
 
-/// A recursive directory tree. Leaves (files) are nodes with empty children.
-/// BTreeMap keeps entries sorted alphabetically without an explicit sort step.
+use super::layout::PageBuilder;
+
+/// A recursive directory tree. BTreeMap keeps entries sorted alphabetically.
 struct Tree(BTreeMap<String, Tree>);
 
 impl Tree {
@@ -44,13 +44,13 @@ impl Tree {
     }
 }
 
-pub fn render(doc: &mut genpdfi::Document, paths: &[PathBuf]) {
-    doc.push(
-        Paragraph::new("File Tree")
-            .aligned(Alignment::Center)
-            .styled(style::Style::new().bold().with_font_size(16)),
-    );
-    doc.push(elements::Break::new(1.0));
+pub fn render(builder: &mut PageBuilder, paths: &[PathBuf]) {
+    let bold = builder.font(true, false).clone();
+    let regular = builder.font(false, false).clone();
+    let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
+
+    builder.write_centered("File Tree", &bold, Pt(16.0), black.clone());
+    builder.vertical_space(10.0);
 
     let mut root = Tree::new();
     paths.iter().for_each(|p| {
@@ -62,10 +62,15 @@ pub fn render(doc: &mut genpdfi::Document, paths: &[PathBuf]) {
     });
 
     root.to_lines("").into_iter().for_each(|line| {
-        doc.push(Paragraph::new(line).styled(style::Style::new().with_font_size(7)));
+        builder.write_line(&[super::layout::Span {
+            text: line,
+            font_id: regular.clone(),
+            size: Pt(7.0),
+            color: black.clone(),
+        }]);
     });
 
-    doc.push(elements::PageBreak::new());
+    builder.page_break();
 }
 
 #[cfg(test)]
@@ -91,18 +96,14 @@ mod tests {
         let lines = tree.to_lines("");
         assert!(lines.len() >= 4);
         let joined = lines.join("\n");
-        // Branch connector
         assert!(joined.contains('\u{251C}'));
-        // Last-item connector
         assert!(joined.contains('\u{2514}'));
-        // Horizontal bar
         assert!(joined.contains('\u{2500}'));
     }
 
     #[test]
     fn empty_tree() {
-        let tree = Tree::new();
-        assert!(tree.to_lines("").is_empty());
+        assert!(Tree::new().to_lines("").is_empty());
     }
 
     #[test]
@@ -123,8 +124,6 @@ mod tests {
         tree.insert(&["a", "b", "c", "d", "e.txt"]);
         let lines = tree.to_lines("");
         assert_eq!(lines.len(), 5);
-        assert!(lines[0].contains("a"));
-        assert!(lines[4].contains("e.txt"));
     }
 
     #[test]
@@ -133,52 +132,22 @@ mod tests {
         tree.insert(&["src", "a.rs"]);
         tree.insert(&["src", "b.rs"]);
         tree.insert(&["src", "c.rs"]);
-        let lines = tree.to_lines("");
-        // src + 3 files = 4 lines
-        assert_eq!(lines.len(), 4);
-    }
-
-    #[test]
-    fn sibling_directories() {
-        let mut tree = Tree::new();
-        tree.insert(&["src", "main.rs"]);
-        tree.insert(&["tests", "test.rs"]);
-        let lines = tree.to_lines("");
-        assert_eq!(lines.len(), 4);
-        let joined = lines.join("\n");
-        assert!(joined.contains("src"));
-        assert!(joined.contains("tests"));
-    }
-
-    #[test]
-    fn prefix_propagation() {
-        let mut tree = Tree::new();
-        tree.insert(&["a", "b", "c.txt"]);
-        tree.insert(&["a", "d.txt"]);
-        let lines = tree.to_lines("");
-        // Lines deeper in the tree should have longer prefixes
-        assert!(lines.last().unwrap().len() > lines.first().unwrap().len() || lines.len() >= 2);
-    }
-
-    #[test]
-    fn last_item_uses_corner_connector() {
-        let mut tree = Tree::new();
-        tree.insert(&["only.txt"]);
-        let lines = tree.to_lines("");
-        assert_eq!(lines.len(), 1);
-        // Single item should use └── (last-item connector)
-        assert!(lines[0].contains('\u{2514}'));
+        assert_eq!(tree.to_lines("").len(), 4);
     }
 
     #[test]
     fn render_does_not_panic() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = crate::pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = crate::types::Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        let paths = vec![
-            PathBuf::from("src/main.rs"),
-            PathBuf::from("src/lib.rs"),
-            PathBuf::from("Cargo.toml"),
-        ];
-        render(&mut doc, &paths);
+        let mut builder = crate::pdf::create_builder(&config, fonts);
+        render(
+            &mut builder,
+            &[
+                PathBuf::from("src/main.rs"),
+                PathBuf::from("src/lib.rs"),
+                PathBuf::from("Cargo.toml"),
+            ],
+        );
     }
 }

@@ -81,9 +81,9 @@ mod tests {
 
     #[test]
     fn all_patterns_are_valid_globs() {
-        for pattern in DEFAULT_EXCLUDES {
+        DEFAULT_EXCLUDES.iter().for_each(|pattern| {
             Glob::new(pattern).unwrap_or_else(|e| panic!("invalid glob '{pattern}': {e}"));
-        }
+        });
     }
 
     #[test]

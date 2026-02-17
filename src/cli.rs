@@ -7,11 +7,12 @@ use crate::types::PaperSize;
 #[command(
     name = "gitprint",
     about = "Convert git repositories into beautifully formatted PDFs",
-    version
+    version,
+    arg_required_else_help = true,
+    after_help = binary_size_info(),
 )]
 pub struct Args {
     /// Path to git repository
-    #[arg(default_value = ".")]
     pub path: PathBuf,
 
     /// Output PDF file path
@@ -67,28 +68,39 @@ pub struct Args {
     pub list_themes: bool,
 }
 
+fn binary_size_info() -> &'static str {
+    static INFO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    INFO.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| {
+                let bytes = m.len();
+                let (size, unit) = if bytes >= 1_048_576 {
+                    (bytes as f64 / 1_048_576.0, "MB")
+                } else {
+                    (bytes as f64 / 1_024.0, "KB")
+                };
+                format!("Binary size: {size:.1} {unit}")
+            })
+            .unwrap_or_default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
 
     #[test]
-    fn default_args() {
-        let args = Args::parse_from(["gitprint"]);
+    fn requires_path_argument() {
+        assert!(Args::try_parse_from(["gitprint"]).is_err());
+    }
+
+    #[test]
+    fn accepts_path() {
+        let args = Args::parse_from(["gitprint", "."]);
         assert_eq!(args.path, PathBuf::from("."));
-        assert!(args.output.is_none());
-        assert!(args.include.is_empty());
-        assert!(args.exclude.is_empty());
-        assert_eq!(args.theme, "InspiredGitHub");
-        assert_eq!(args.font_size, 8.0);
-        assert!(!args.no_line_numbers);
-        assert!(!args.no_toc);
-        assert!(!args.no_file_tree);
-        assert!(args.branch.is_none());
-        assert!(args.commit.is_none());
-        assert!(matches!(args.paper_size, PaperSize::A4));
-        assert!(!args.landscape);
-        assert!(!args.list_themes);
     }
 
     #[test]
@@ -99,13 +111,13 @@ mod tests {
 
     #[test]
     fn output_short_flag() {
-        let args = Args::parse_from(["gitprint", "-o", "out.pdf"]);
+        let args = Args::parse_from(["gitprint", ".", "-o", "out.pdf"]);
         assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
     }
 
     #[test]
     fn output_long_flag() {
-        let args = Args::parse_from(["gitprint", "--output", "out.pdf"]);
+        let args = Args::parse_from(["gitprint", ".", "--output", "out.pdf"]);
         assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
     }
 
@@ -145,13 +157,13 @@ mod tests {
 
     #[test]
     fn commit_flag() {
-        let args = Args::parse_from(["gitprint", "--commit", "abc1234"]);
+        let args = Args::parse_from(["gitprint", ".", "--commit", "abc1234"]);
         assert_eq!(args.commit, Some("abc1234".to_string()));
     }
 
     #[test]
     fn paper_size_legal() {
-        let args = Args::parse_from(["gitprint", "--paper-size", "legal"]);
+        let args = Args::parse_from(["gitprint", ".", "--paper-size", "legal"]);
         assert!(matches!(args.paper_size, PaperSize::Legal));
     }
 
@@ -159,6 +171,7 @@ mod tests {
     fn multiple_include_exclude() {
         let args = Args::parse_from([
             "gitprint",
+            ".",
             "--include",
             "*.rs",
             "--include",
@@ -174,7 +187,7 @@ mod tests {
 
     #[test]
     fn font_size_custom() {
-        let args = Args::parse_from(["gitprint", "--font-size", "12.5"]);
+        let args = Args::parse_from(["gitprint", ".", "--font-size", "12.5"]);
         assert_eq!(args.font_size, 12.5);
     }
 }

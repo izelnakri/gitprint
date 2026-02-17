@@ -105,9 +105,9 @@ mod tests {
             Box::new(Error::Font("x".into())),
             Box::new(Error::Io(std::io::Error::other("x"))),
         ];
-        for v in &variants {
+        variants.iter().for_each(|v| {
             let debug = format!("{v:?}");
             assert!(!debug.is_empty());
-        }
+        });
     }
 }

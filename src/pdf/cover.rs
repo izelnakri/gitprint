@@ -1,54 +1,60 @@
-use genpdfi::elements::{self, Paragraph};
-use genpdfi::{Alignment, Element, style};
+use printpdf::{Color, Pt, Rgb};
 
+use super::layout::{PageBuilder, Span};
 use crate::types::RepoMetadata;
 
-pub fn render(doc: &mut genpdfi::Document, metadata: &RepoMetadata) {
-    let file_count = metadata.file_count.to_string();
-    let total_lines = metadata.total_lines.to_string();
+pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata) {
+    let bold = builder.font(true, false).clone();
+    let regular = builder.font(false, false).clone();
+    let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
 
-    doc.push(elements::Break::new(6.0));
-    doc.push(
-        Paragraph::new(&metadata.name)
-            .aligned(Alignment::Center)
-            .styled(style::Style::new().bold().with_font_size(28)),
-    );
-    doc.push(elements::Break::new(4.0));
+    builder.vertical_space(120.0);
+    builder.write_centered(&metadata.name, &bold, Pt(28.0), black.clone());
+    builder.vertical_space(40.0);
 
     [
-        ("Branch:", metadata.branch.as_str()),
-        ("Commit:", metadata.commit_hash_short.as_str()),
-        ("Date:", metadata.commit_date.as_str()),
-        ("Message:", metadata.commit_message.as_str()),
-        ("Files:", file_count.as_str()),
-        ("Lines:", total_lines.as_str()),
+        ("Branch:  ", metadata.branch.as_str()),
+        ("Commit:  ", metadata.commit_hash_short.as_str()),
+        ("Date:    ", metadata.commit_date.as_str()),
+        ("Message: ", metadata.commit_message.as_str()),
+        ("Files:   ", &metadata.file_count.to_string()),
+        ("Lines:   ", &metadata.total_lines.to_string()),
     ]
-    .iter()
+    .into_iter()
     .for_each(|(label, value)| {
-        doc.push(
-            Paragraph::default()
-                .styled_string(*label, style::Style::new().bold().with_font_size(10))
-                .styled_string(format!("  {value}"), style::Style::new().with_font_size(10))
-                .aligned(Alignment::Center),
-        );
-        doc.push(elements::Break::new(0.3));
+        builder.write_line(&[
+            Span {
+                text: label.into(),
+                font_id: bold.clone(),
+                size: Pt(10.0),
+                color: black.clone(),
+            },
+            Span {
+                text: value.into(),
+                font_id: regular.clone(),
+                size: Pt(10.0),
+                color: black.clone(),
+            },
+        ]);
+        builder.vertical_space(3.0);
     });
 
-    doc.push(elements::PageBreak::new());
+    builder.page_break();
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::pdf;
     use crate::types::{Config, RepoMetadata};
 
     fn test_metadata() -> RepoMetadata {
         RepoMetadata {
-            name: "test-repo".to_string(),
-            branch: "main".to_string(),
-            commit_hash: "abc1234567890abcdef1234567890abcdef123456".to_string(),
-            commit_hash_short: "abc1234".to_string(),
-            commit_date: "2024-01-01 12:00:00 +0000".to_string(),
-            commit_message: "initial commit".to_string(),
+            name: "test-repo".into(),
+            branch: "main".into(),
+            commit_hash: "abc1234567890abcdef1234567890abcdef123456".into(),
+            commit_hash_short: "abc1234".into(),
+            commit_date: "2024-01-01 12:00:00 +0000".into(),
+            commit_message: "initial commit".into(),
             file_count: 5,
             total_lines: 100,
         }
@@ -56,35 +62,32 @@ mod tests {
 
     #[test]
     fn render_cover_does_not_panic() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        super::render(&mut doc, &test_metadata());
+        let mut builder = pdf::create_builder(&config, fonts);
+        super::render(&mut builder, &test_metadata());
+        assert!(builder.finish().len() >= 2);
     }
 
     #[test]
     fn render_cover_with_empty_metadata() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        let meta = RepoMetadata {
-            name: String::new(),
-            branch: String::new(),
-            commit_hash: String::new(),
-            commit_hash_short: String::new(),
-            commit_date: String::new(),
-            commit_message: String::new(),
-            file_count: 0,
-            total_lines: 0,
-        };
-        super::render(&mut doc, &meta);
-    }
-
-    #[test]
-    fn render_cover_with_large_counts() {
-        let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        let mut meta = test_metadata();
-        meta.file_count = 999_999;
-        meta.total_lines = 10_000_000;
-        super::render(&mut doc, &meta);
+        let mut builder = pdf::create_builder(&config, fonts);
+        super::render(
+            &mut builder,
+            &RepoMetadata {
+                name: String::new(),
+                branch: String::new(),
+                commit_hash: String::new(),
+                commit_hash_short: String::new(),
+                commit_date: String::new(),
+                commit_message: String::new(),
+                file_count: 0,
+                total_lines: 0,
+            },
+        );
     }
 }

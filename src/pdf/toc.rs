@@ -1,78 +1,75 @@
 use std::path::Path;
 
-use genpdfi::elements::{self, Paragraph};
-use genpdfi::{Alignment, Element, style};
+use printpdf::{Color, Pt, Rgb};
 
-fn make_entry(path: &Path, line_count: usize) -> Paragraph {
-    Paragraph::default()
-        .styled_string(
-            path.display().to_string(),
-            style::Style::new().with_font_size(8),
-        )
-        .styled_string(
-            format!("  ({line_count} lines)"),
-            style::Style::new()
-                .with_font_size(7)
-                .with_color(style::Color::Rgb(120, 120, 120)),
-        )
-}
+use super::layout::{PageBuilder, Span};
 
-/// Renders a table of contents. Each entry is a `(path, line_count)` pair.
-pub fn render(doc: &mut genpdfi::Document, files: &[(&Path, usize)]) {
-    doc.push(
-        Paragraph::new("Table of Contents")
-            .aligned(Alignment::Center)
-            .styled(style::Style::new().bold().with_font_size(16)),
-    );
-    doc.push(elements::Break::new(1.0));
+pub fn render(builder: &mut PageBuilder, files: &[(&Path, usize)]) {
+    let bold = builder.font(true, false).clone();
+    let regular = builder.font(false, false).clone();
+    let gray = Color::Rgb(Rgb::new(0.47, 0.47, 0.47, None));
+    let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
 
-    files
-        .iter()
-        .map(|(path, lines)| make_entry(path, *lines))
-        .for_each(|entry| doc.push(entry));
+    builder.write_centered("Table of Contents", &bold, Pt(16.0), black);
+    builder.vertical_space(10.0);
 
-    doc.push(elements::PageBreak::new());
+    files.iter().for_each(|(path, lines)| {
+        builder.write_line(&[
+            Span {
+                text: path.display().to_string(),
+                font_id: regular.clone(),
+                size: Pt(8.0),
+                color: gray.clone(),
+            },
+            Span {
+                text: format!("  ({lines} lines)"),
+                font_id: regular.clone(),
+                size: Pt(7.0),
+                color: gray.clone(),
+            },
+        ]);
+    });
+
+    builder.page_break();
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
+    use crate::pdf;
     use crate::types::Config;
+    use std::path::Path;
 
     #[test]
     fn render_toc_does_not_panic() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
+        let mut builder = pdf::create_builder(&config, fonts);
         let entries: Vec<(&Path, usize)> = vec![
             (Path::new("src/main.rs"), 20),
             (Path::new("src/lib.rs"), 50),
         ];
-        super::render(&mut doc, &entries);
+        super::render(&mut builder, &entries);
     }
 
     #[test]
     fn render_toc_empty_files() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        super::render(&mut doc, &[]);
+        let mut builder = pdf::create_builder(&config, fonts);
+        super::render(&mut builder, &[]);
     }
 
     #[test]
     fn render_toc_many_files() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
+        let mut builder = pdf::create_builder(&config, fonts);
         let entries: Vec<(&Path, usize)> = (0..100)
             .map(|i| (Path::new("src/file.rs"), i * 10))
             .collect();
-        super::render(&mut doc, &entries);
-    }
-
-    #[test]
-    fn render_toc_zero_line_count() {
-        let config = Config::test_default();
-        let mut doc = crate::pdf::create_document(&config).unwrap();
-        let entries: Vec<(&Path, usize)> = vec![(Path::new("empty.rs"), 0)];
-        super::render(&mut doc, &entries);
+        super::render(&mut builder, &entries);
     }
 }

@@ -158,10 +158,10 @@ mod tests {
     fn highlight_tokens_have_rgb_colors() {
         let h = Highlighter::new("InspiredGitHub").unwrap();
         let lines: Vec<_> = h.highlight_lines("let x = 1;", Path::new("t.rs")).collect();
-        for token in &lines[0].tokens {
+        lines[0].tokens.iter().for_each(|token| {
             // RGB values should be valid (0-255 is guaranteed by u8)
             let _ = (token.color.r, token.color.g, token.color.b);
-        }
+        });
     }
 
     #[test]
