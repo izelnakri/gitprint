@@ -4,13 +4,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -20,16 +21,28 @@
           extensions = [ "rust-src" "rust-analyzer" "clippy" ];
         };
 
-        cargoHash = "sha256-5nSy/RY9bQtGS/jbgtNhreC7lHLa0E/MqOW8cCEgv9c=";
+        craneLib = crane.mkLib pkgs;
 
-        gitprint = pkgs.rustPlatform.buildRustPackage {
-          pname = "gitprint";
-          version = "0.1.0";
-          src = pkgs.lib.cleanSource ./.;
+        # Source filtering: include Rust/Cargo files + embedded fonts
+        unfilteredRoot = ./.;
+        src = pkgs.lib.fileset.toSource {
+          root = unfilteredRoot;
+          fileset = pkgs.lib.fileset.unions [
+            (craneLib.fileset.commonCargoSources unfilteredRoot)
+            (pkgs.lib.fileset.fileFilter (file: file.hasExt "ttf") unfilteredRoot)
+          ];
+        };
 
-          inherit cargoHash;
-
+        commonArgs = {
+          inherit src;
           nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
+        };
+
+        # Build dependencies only — cached separately from source changes
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        gitprint = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
           nativeCheckInputs = [ pkgs.git ];
 
           preCheck = ''
@@ -47,7 +60,7 @@
             license = licenses.mit;
             mainProgram = "gitprint";
           };
-        };
+        });
       in
       {
         packages = {
@@ -73,39 +86,14 @@
         checks = {
           inherit gitprint;
 
-          clippy = pkgs.rustPlatform.buildRustPackage {
-            pname = "gitprint-clippy";
-            version = "0.1.0";
-            src = pkgs.lib.cleanSource ./.;
-            inherit cargoHash;
-            nativeBuildInputs = [ pkgs.pkg-config pkgs.clippy ];
-            doCheck = false;
-            buildPhase = "cargo clippy --all-targets -- -D warnings";
-            installPhase = "touch $out";
-          };
+          clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            cargoClippyExtraArgs = "--all-targets -- -D warnings";
+          });
 
-          tests = pkgs.rustPlatform.buildRustPackage {
-            pname = "gitprint-tests";
-            version = "0.1.0";
-            src = pkgs.lib.cleanSource ./.;
-            inherit cargoHash;
-            doCheck = false;
-            nativeBuildInputs = [ pkgs.pkg-config pkgs.git ];
-            buildPhase = ''
-              export HOME=$(mktemp -d)
-              cargo test --all
-            '';
-            installPhase = "touch $out";
+          fmt = craneLib.cargoFmt {
+            inherit src;
           };
-
-          fmt = pkgs.runCommand "gitprint-fmt-check" {
-            nativeBuildInputs = [ rustToolchain ];
-            src = pkgs.lib.cleanSource ./.;
-          } ''
-            cd $src
-            cargo fmt -- --check
-            touch $out
-          '';
         };
       }
     ) // {

@@ -5,7 +5,17 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:crates.io)",
-      "Bash(cargo search:*)"
+      "Bash(cargo search:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(nix flake check:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(gh run list:*)",
+      "Bash(echo:*)"
     ]
   }
 }
