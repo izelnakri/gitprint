@@ -30,6 +30,11 @@
           inherit cargoHash;
 
           nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
+          nativeCheckInputs = [ pkgs.git ];
+
+          preCheck = ''
+            export HOME=$(mktemp -d)
+          '';
 
           postInstall = ''
             wrapProgram $out/bin/gitprint \
@@ -72,9 +77,9 @@
             pname = "gitprint-clippy";
             version = "0.1.0";
             src = pkgs.lib.cleanSource ./.;
-  
             inherit cargoHash;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.clippy ];
+            doCheck = false;
             buildPhase = "cargo clippy --all-targets -- -D warnings";
             installPhase = "touch $out";
           };
@@ -83,8 +88,8 @@
             pname = "gitprint-tests";
             version = "0.1.0";
             src = pkgs.lib.cleanSource ./.;
-  
             inherit cargoHash;
+            doCheck = false;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.git ];
             buildPhase = ''
               export HOME=$(mktemp -d)
