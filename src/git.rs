@@ -42,9 +42,7 @@ pub fn get_metadata(repo_path: &Path, config: &Config) -> Result<RepoMetadata, E
             .unwrap_or_else(|_| "detached".to_string())
     });
 
-    let commit_hash = run_git(repo_path, &["rev-parse", &rev])?
-        .trim()
-        .to_string();
+    let commit_hash = run_git(repo_path, &["rev-parse", &rev])?.trim().to_string();
 
     let commit_hash_short = commit_hash[..7.min(commit_hash.len())].to_string();
 

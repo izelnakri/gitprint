@@ -1,3 +1,10 @@
+//! # gitprint
+//!
+//! Convert git repositories into syntax-highlighted, printer-friendly PDFs.
+//!
+//! The main entry point is [`run()`], which executes the full pipeline:
+//! git repository inspection, file filtering, syntax highlighting, and PDF generation.
+
 pub mod cli;
 pub mod defaults;
 pub mod error;
@@ -58,7 +65,14 @@ pub fn run(config: &Config) -> Result<(), Error> {
         if let Some(content) = read_text_file(&repo_path, path, config) {
             let highlighted = highlighter.highlight_lines(&content, path);
             let display_path = path.display().to_string();
-            pdf::code::render_file(&mut doc, &display_path, highlighted, lines, !config.no_line_numbers, config.font_size as u8);
+            pdf::code::render_file(
+                &mut doc,
+                &display_path,
+                highlighted,
+                lines,
+                !config.no_line_numbers,
+                config.font_size as u8,
+            );
             // `content` and highlighted iterator are dropped here
         }
     });

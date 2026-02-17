@@ -20,12 +20,14 @@
           extensions = [ "rust-src" "rust-analyzer" "clippy" ];
         };
 
+        cargoHash = "sha256-5nSy/RY9bQtGS/jbgtNhreC7lHLa0E/MqOW8cCEgv9c=";
+
         gitprint = pkgs.rustPlatform.buildRustPackage {
           pname = "gitprint";
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
-          useFetchCargoVendor = true;
-          cargoHash = pkgs.lib.fakeHash;
+
+          inherit cargoHash;
 
           nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
 
@@ -70,10 +72,24 @@
             pname = "gitprint-clippy";
             version = "0.1.0";
             src = pkgs.lib.cleanSource ./.;
-            useFetchCargoVendor = true;
-            cargoHash = pkgs.lib.fakeHash;
-            nativeBuildInputs = [ pkgs.pkg-config ];
-            buildPhase = "cargo clippy -- -D warnings";
+  
+            inherit cargoHash;
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.clippy ];
+            buildPhase = "cargo clippy --all-targets -- -D warnings";
+            installPhase = "touch $out";
+          };
+
+          tests = pkgs.rustPlatform.buildRustPackage {
+            pname = "gitprint-tests";
+            version = "0.1.0";
+            src = pkgs.lib.cleanSource ./.;
+  
+            inherit cargoHash;
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.git ];
+            buildPhase = ''
+              export HOME=$(mktemp -d)
+              cargo test --all
+            '';
             installPhase = "touch $out";
           };
 

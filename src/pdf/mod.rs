@@ -38,3 +38,48 @@ pub fn write_pdf(doc: genpdfi::Document, path: &Path) -> Result<(), Error> {
     doc.render_to_file(path)
         .map_err(|e| Error::Pdf(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Config;
+
+    #[test]
+    fn create_document_a4() {
+        let config = Config::test_default();
+        assert!(create_document(&config).is_ok());
+    }
+
+    #[test]
+    fn create_document_letter() {
+        let mut config = Config::test_default();
+        config.paper_size = PaperSize::Letter;
+        assert!(create_document(&config).is_ok());
+    }
+
+    #[test]
+    fn create_document_legal() {
+        let mut config = Config::test_default();
+        config.paper_size = PaperSize::Legal;
+        assert!(create_document(&config).is_ok());
+    }
+
+    #[test]
+    fn write_pdf_to_tempfile() {
+        let config = Config::test_default();
+        let doc = create_document(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.pdf");
+        assert!(write_pdf(doc, &path).is_ok());
+        assert!(path.exists());
+        assert!(std::fs::metadata(&path).unwrap().len() > 0);
+    }
+
+    #[test]
+    fn write_pdf_invalid_path() {
+        let config = Config::test_default();
+        let doc = create_document(&config).unwrap();
+        let result = write_pdf(doc, Path::new("/nonexistent/dir/test.pdf"));
+        assert!(result.is_err());
+    }
+}

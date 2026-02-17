@@ -66,3 +66,115 @@ pub struct Args {
     #[arg(long)]
     pub list_themes: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn default_args() {
+        let args = Args::parse_from(["gitprint"]);
+        assert_eq!(args.path, PathBuf::from("."));
+        assert!(args.output.is_none());
+        assert!(args.include.is_empty());
+        assert!(args.exclude.is_empty());
+        assert_eq!(args.theme, "InspiredGitHub");
+        assert_eq!(args.font_size, 8.0);
+        assert!(!args.no_line_numbers);
+        assert!(!args.no_toc);
+        assert!(!args.no_file_tree);
+        assert!(args.branch.is_none());
+        assert!(args.commit.is_none());
+        assert!(matches!(args.paper_size, PaperSize::A4));
+        assert!(!args.landscape);
+        assert!(!args.list_themes);
+    }
+
+    #[test]
+    fn custom_path() {
+        let args = Args::parse_from(["gitprint", "/tmp/repo"]);
+        assert_eq!(args.path, PathBuf::from("/tmp/repo"));
+    }
+
+    #[test]
+    fn output_short_flag() {
+        let args = Args::parse_from(["gitprint", "-o", "out.pdf"]);
+        assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
+    }
+
+    #[test]
+    fn output_long_flag() {
+        let args = Args::parse_from(["gitprint", "--output", "out.pdf"]);
+        assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
+    }
+
+    #[test]
+    fn all_flags() {
+        let args = Args::parse_from([
+            "gitprint",
+            "/tmp/repo",
+            "-o",
+            "out.pdf",
+            "--theme",
+            "Solarized (dark)",
+            "--font-size",
+            "10",
+            "--no-line-numbers",
+            "--no-toc",
+            "--no-file-tree",
+            "--branch",
+            "dev",
+            "--paper-size",
+            "letter",
+            "--landscape",
+            "--list-themes",
+        ]);
+        assert_eq!(args.path, PathBuf::from("/tmp/repo"));
+        assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
+        assert_eq!(args.theme, "Solarized (dark)");
+        assert_eq!(args.font_size, 10.0);
+        assert!(args.no_line_numbers);
+        assert!(args.no_toc);
+        assert!(args.no_file_tree);
+        assert_eq!(args.branch, Some("dev".to_string()));
+        assert!(matches!(args.paper_size, PaperSize::Letter));
+        assert!(args.landscape);
+        assert!(args.list_themes);
+    }
+
+    #[test]
+    fn commit_flag() {
+        let args = Args::parse_from(["gitprint", "--commit", "abc1234"]);
+        assert_eq!(args.commit, Some("abc1234".to_string()));
+    }
+
+    #[test]
+    fn paper_size_legal() {
+        let args = Args::parse_from(["gitprint", "--paper-size", "legal"]);
+        assert!(matches!(args.paper_size, PaperSize::Legal));
+    }
+
+    #[test]
+    fn multiple_include_exclude() {
+        let args = Args::parse_from([
+            "gitprint",
+            "--include",
+            "*.rs",
+            "--include",
+            "*.toml",
+            "--exclude",
+            "*.lock",
+            "--exclude",
+            "*.md",
+        ]);
+        assert_eq!(args.include, vec!["*.rs", "*.toml"]);
+        assert_eq!(args.exclude, vec!["*.lock", "*.md"]);
+    }
+
+    #[test]
+    fn font_size_custom() {
+        let args = Args::parse_from(["gitprint", "--font-size", "12.5"]);
+        assert_eq!(args.font_size, 12.5);
+    }
+}
