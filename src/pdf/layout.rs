@@ -1,4 +1,7 @@
-use printpdf::{Color, FontId, Mm, Op, PdfFontHandle, PdfPage, Pt, Rgb, TextItem, graphics::Point};
+use printpdf::{
+    Actions, BorderArray, Color, ColorArray, FontId, LinkAnnotation, Mm, Op, PdfFontHandle,
+    PdfPage, Pt, Rect, Rgb, TextItem, graphics::Point,
+};
 
 /// A styled text span within a line.
 pub struct Span {
@@ -137,6 +140,55 @@ impl PageBuilder {
         if self.remaining() < needed_pt {
             self.start_new_page();
         }
+    }
+
+    /// Width in points available for text between the two margins.
+    pub fn usable_width_pt(&self) -> f32 {
+        self.page_width.into_pt().0 - 2.0 * self.margin.into_pt().0
+    }
+
+    /// The line height in points used by this builder.
+    pub fn line_height(&self) -> f32 {
+        self.line_height
+    }
+
+    /// Remaining vertical space in points on the current page.
+    pub fn remaining_pt(&self) -> f32 {
+        self.usable_height() - self.y
+    }
+
+    /// Emits an invisible link annotation covering the last `height_pt` of vertical space written.
+    ///
+    /// Must be called immediately after the text it should cover (e.g. `write_line*` or
+    /// `write_centered`). Pass `builder.line_height()` for a single standard line, or
+    /// `n as f32 * builder.line_height()` for n lines (used in TOC). For non-standard font
+    /// sizes (e.g. the cover title at 28 pt) pass `font_size + leading` directly.
+    ///
+    /// The ascender shift is clamped to one line height so multi-row spans don't
+    /// shift the entire rect up by their full height.
+    pub fn add_link(&mut self, height_pt: f32, action: Actions) {
+        // In printpdf, text is placed at its baseline. Visual glyphs extend
+        // ~0.7× above (ascenders) and ~0.2× below (descenders) a single line.
+        // Shift up by 0.8× of one line so the rect covers what users see.
+        let ascender_shift = height_pt.min(self.line_height) * 0.8;
+        let y_bottom = Pt(
+            self.page_height.into_pt().0 - self.margin.into_pt().0 - 12.0 - self.y + ascender_shift,
+        );
+        let rect = Rect::from_xywh(
+            self.left_x(),
+            y_bottom,
+            Pt(self.usable_width_pt()),
+            Pt(height_pt),
+        );
+        self.current_ops.push(Op::LinkAnnotation {
+            link: LinkAnnotation::new(
+                rect,
+                action,
+                Some(BorderArray::Solid([0.0, 0.0, 0.0])),
+                Some(ColorArray::Transparent),
+                None,
+            ),
+        });
     }
 
     /// Mark a section boundary. The new page is created lazily on the next write,

@@ -40,6 +40,35 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Formats the current UTC time as `YYYY-MM-DD HH:MM:SS UTC`.
+///
+/// Uses Howard Hinnant's Euclidean Gregorian algorithm — no external crate needed.
+fn format_utc_now() -> String {
+    let total_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let (h, m, s) = (
+        (total_secs / 3600) % 24,
+        (total_secs / 60) % 60,
+        total_secs % 60,
+    );
+
+    let z = (total_secs / 86400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02} UTC")
+}
+
 fn format_elapsed(elapsed: std::time::Duration) -> String {
     if elapsed.as_millis() < 1000 {
         format!("{}ms", elapsed.as_millis())
@@ -119,10 +148,25 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
         let lines: Vec<HighlightedLine> =
             highlighter.highlight_lines(&content, single_file).collect();
 
-        let mut doc = printpdf::PdfDocument::new("gitprint");
+        let doc_title = config
+            .remote_url
+            .as_deref()
+            .map(git::repo_name_from_url)
+            .unwrap_or_else(|| {
+                config
+                    .repo_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "gitprint".to_string())
+            });
+        let mut doc = printpdf::PdfDocument::new(&doc_title);
         let fonts = pdf::fonts::load_fonts(&mut doc)?;
         let mut builder = pdf::create_builder(config, fonts);
         let file_info = format!("{line_count} LOC \u{00B7} {size_str} \u{00B7} {last_modified}");
+        let header_url = config.remote_url.as_ref().map(|url| {
+            let base = url.trim_end_matches(".git");
+            format!("{base}/blob/HEAD/{}", single_file.display())
+        });
         pdf::code::render_file(
             &mut builder,
             &single_file.display().to_string(),
@@ -131,6 +175,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
             !config.no_line_numbers,
             config.font_size as u8,
             &file_info,
+            header_url.as_deref(),
         );
         let pages = builder.finish();
         let total_pages = pages.len();
@@ -156,18 +201,41 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     let is_git = info.is_git;
     let scope = info.scope;
 
-    // Parallel: git metadata + tracked file list + date map + highlighter init.
+    // Parallel: git metadata + tracked file list + date map + highlighter init
+    // + fs owner/group + repo disk size (for local paths).
     // Highlighter::new is CPU-bound (syntect deserialization); spawn_blocking keeps
     // tokio worker threads free for the concurrent I/O-bound git calls.
     let theme = config.theme.clone();
-    let (metadata_res, all_paths_res, date_map_res, highlighter_res) = tokio::join!(
+    let fs_path = config.repo_path.clone();
+    let fs_path2 = config.repo_path.clone();
+    let is_remote = config.remote_url.is_some();
+    let generated_at = format_utc_now();
+    let (metadata_res, all_paths_res, date_map_res, highlighter_res, fs_owner_group, size) = tokio::join!(
         git::get_metadata(&repo_path, config, is_git, scope.as_deref()),
         git::list_tracked_files(&repo_path, config, is_git, scope.as_deref()),
         git::file_last_modified_dates(&repo_path, config, is_git, scope.as_deref()),
         tokio::task::spawn_blocking(move || highlight::Highlighter::new(&theme)),
+        async move {
+            if is_remote {
+                (None, None)
+            } else {
+                git::fs_owner_group(&fs_path).await
+            }
+        },
+        git::repo_size(&fs_path2),
     );
 
     let mut metadata = metadata_res?;
+    if let Some(ref url) = config.remote_url {
+        metadata.name = git::repo_name_from_url(url);
+    }
+    metadata.fs_owner = fs_owner_group.0;
+    metadata.fs_group = fs_owner_group.1;
+    metadata.generated_at = generated_at;
+    metadata.repo_size = size;
+    if !is_remote {
+        metadata.repo_absolute_path = Some(repo_path.clone());
+    }
     let highlighter =
         Arc::new(highlighter_res.map_err(|e| anyhow::anyhow!("highlighter panicked: {e}"))??);
     let date_map = Arc::new(date_map_res?);
@@ -220,7 +288,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     metadata.total_lines = files.iter().map(|f| f.line_count).sum();
 
     // Build PDF document and load fonts once.
-    let mut doc = printpdf::PdfDocument::new("gitprint");
+    let mut doc = printpdf::PdfDocument::new(&metadata.name);
     let fonts = pdf::fonts::load_fonts(&mut doc)?;
 
     // Collect paths and build dummy TOC entries before the parallel render phase.
@@ -239,9 +307,16 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
         })
         .collect();
 
+    // For cover links: use explicit remote_url from CLI, or fall back to remote detected
+    // from git config so links work even when printing a local repo without --remote.
+    let effective_remote_url = config
+        .remote_url
+        .as_deref()
+        .or(metadata.detected_remote_url.as_deref());
+
     let cover_pages = {
         let mut b = pdf::create_builder(config, fonts.clone());
-        pdf::cover::render(&mut b, &metadata);
+        pdf::cover::render(&mut b, &metadata, effective_remote_url);
         b.finish()
     };
     let toc_count = if config.toc {
@@ -265,6 +340,16 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     let mut content_builder = pdf::create_builder_at_page(config, fonts.clone(), file_base_page);
     let mut toc_entries: Vec<pdf::toc::TocEntry> = Vec::with_capacity(files.len());
 
+    let remote_base = config.remote_url.as_ref().map(|url| {
+        let base = url.trim_end_matches(".git");
+        let commit = if metadata.commit_hash.is_empty() {
+            "HEAD"
+        } else {
+            &metadata.commit_hash
+        };
+        format!("{base}/blob/{commit}")
+    });
+
     files.into_iter().for_each(|file| {
         let start_page = content_builder.current_page();
         let info = format!(
@@ -278,6 +363,9 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
             last_modified: file.last_modified.clone(),
             start_page,
         });
+        let header_url = remote_base
+            .as_ref()
+            .map(|base| format!("{base}/{}", file.path.display()));
         pdf::code::render_file(
             &mut content_builder,
             &file.path.display().to_string(),
@@ -286,6 +374,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
             !config.no_line_numbers,
             config.font_size as u8,
             &info,
+            header_url.as_deref(),
         );
     });
     let content_pages = content_builder.finish();

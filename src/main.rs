@@ -74,6 +74,7 @@ async fn main() {
         commit: args.commit,
         paper_size: args.paper_size,
         landscape: args.landscape,
+        remote_url: is_remote.then(|| args.path.clone()),
     };
 
     if let Err(e) = gitprint::run(&config).await {

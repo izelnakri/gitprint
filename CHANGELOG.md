@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-02-18
+### Features
+- Add make fix, cargo binstall support, and faster nix run
+- Accept remote URLs as input (git clone + generate PDF)
+- Improve Metadata first page
+
 ## [0.3.1] - 2026-02-18
 ### Features
 - Slim down dependency tree further

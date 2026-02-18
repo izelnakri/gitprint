@@ -1,8 +1,9 @@
-use printpdf::{Color, Pt, Rgb};
+use printpdf::{Actions, Color, Pt, Rgb};
 
 use super::layout::{PageBuilder, Span};
 use crate::types::HighlightedLine;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_file(
     builder: &mut PageBuilder,
     file_path: &str,
@@ -11,6 +12,8 @@ pub fn render_file(
     show_line_numbers: bool,
     font_size: u8,
     file_info: &str,
+    // If `Some`, the file header becomes a clickable link to this URL (e.g. GitHub blob view).
+    header_url: Option<&str>,
 ) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();
@@ -34,6 +37,9 @@ pub fn render_file(
             color: gray.clone(),
         }],
     );
+    if let Some(url) = header_url {
+        builder.add_link(builder.line_height(), Actions::Uri(url.to_string()));
+    }
     builder.vertical_space(4.0);
 
     lines.for_each(|line| {
@@ -112,6 +118,7 @@ mod tests {
             true,
             8,
             "2 lines \u{00B7} 24 B \u{00B7} 2025-01-15",
+            None,
         );
     }
 
@@ -129,6 +136,7 @@ mod tests {
             true,
             8,
             "0 lines \u{00B7} 0 B",
+            None,
         );
     }
 
@@ -146,6 +154,25 @@ mod tests {
             false,
             8,
             "2 lines \u{00B7} 24 B \u{00B7} 2025-01-15",
+            None,
+        );
+    }
+
+    #[test]
+    fn render_file_with_header_url() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
+        let config = Config::test_default();
+        let mut builder = pdf::create_builder(&config, fonts);
+        super::render_file(
+            &mut builder,
+            "src/main.rs",
+            sample_lines().into_iter(),
+            2,
+            true,
+            8,
+            "2 lines \u{00B7} 24 B \u{00B7} 2025-01-15",
+            Some("https://github.com/user/repo/blob/abc123/src/main.rs"),
         );
     }
 
@@ -174,6 +201,7 @@ mod tests {
             true,
             8,
             "100 lines \u{00B7} 1.2 KB \u{00B7} 2025-01-15",
+            None,
         );
     }
 }

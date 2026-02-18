@@ -38,4 +38,5 @@ doc:
 
 release: fix check
 	git-cliff --bump -o CHANGELOG.md
+	git add CHANGELOG.md
 	cargo release $(LEVEL) --execute

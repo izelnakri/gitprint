@@ -28,7 +28,7 @@ pub fn is_remote_url(s: &str) -> bool {
 /// `git@github.com:user/repo`         → `"repo"`
 pub fn repo_name_from_url(url: &str) -> String {
     url.split(['/', ':'])
-        .last()
+        .next_back()
         .unwrap_or("repo")
         .trim_end_matches(".git")
         .to_string()
@@ -268,8 +268,16 @@ pub async fn get_metadata(
             commit_hash_short: String::new(),
             commit_date: String::new(),
             commit_message: String::new(),
+            commit_author: String::new(),
+            commit_author_email: String::new(),
             file_count: 0,
             total_lines: 0,
+            fs_owner: None,
+            fs_group: None,
+            generated_at: String::new(),
+            repo_size: String::new(),
+            detected_remote_url: None,
+            repo_absolute_path: None,
         });
     }
 
@@ -279,9 +287,10 @@ pub async fn get_metadata(
         _ => "HEAD".to_string(),
     };
 
-    // Run branch detection and commit log in parallel — both are independent git calls.
-    let log_args = ["log", "-1", "--format=%H%n%ci%n%s", &rev];
-    let (branch, log_output) = tokio::join!(
+    // Run branch detection, commit log, and remote URL detection in parallel.
+    // Format: hash, date, subject, author name, author email (one per line, %n separated).
+    let log_args = ["log", "-1", "--format=%H%n%ci%n%s%n%an%n%ae", &rev];
+    let (branch, log_output, detected_remote_url) = tokio::join!(
         async {
             match &config.branch {
                 Some(b) => b.clone(),
@@ -292,6 +301,7 @@ pub async fn get_metadata(
             }
         },
         run_git(repo_path, &log_args),
+        git_remote_url(repo_path),
     );
     let log_output = log_output?;
 
@@ -299,7 +309,20 @@ pub async fn get_metadata(
     let commit_hash = lines.next().unwrap_or("").to_string();
     let commit_hash_short = commit_hash[..7.min(commit_hash.len())].to_string();
     let commit_date = lines.next().unwrap_or("").to_string();
-    let commit_message = lines.collect::<Vec<_>>().join("\n");
+    // Remaining: subject lines, then author name, then author email (last two lines).
+    let remaining: Vec<&str> = lines.collect();
+    let (commit_message, commit_author, commit_author_email) = match remaining.as_slice() {
+        [] => (String::new(), String::new(), String::new()),
+        [.., author, email] => {
+            let subject_lines = &remaining[..remaining.len().saturating_sub(2)];
+            (
+                subject_lines.join("\n"),
+                author.to_string(),
+                email.to_string(),
+            )
+        }
+        [author] => (String::new(), author.to_string(), String::new()),
+    };
 
     Ok(RepoMetadata {
         name,
@@ -308,8 +331,16 @@ pub async fn get_metadata(
         commit_hash_short,
         commit_date,
         commit_message,
+        commit_author,
+        commit_author_email,
         file_count: 0,
         total_lines: 0,
+        fs_owner: None,
+        fs_group: None,
+        generated_at: String::new(),
+        repo_size: String::new(),
+        detected_remote_url,
+        repo_absolute_path: None,
     })
 }
 
@@ -545,9 +576,124 @@ async fn walk_dates_async(root: PathBuf) -> anyhow::Result<HashMap<PathBuf, Stri
     Ok(set.join_all().await.into_iter().flatten().collect())
 }
 
+/// Returns the filesystem owner username and group name for `path`.
+///
+/// Tries GNU `stat -c "%U\n%G"` (Linux/coreutils) then BSD `stat -f "%Su\n%Sg"` (macOS).
+/// Returns `(None, None)` if both fail or the path is inaccessible.
+pub async fn fs_owner_group(path: &Path) -> (Option<String>, Option<String>) {
+    for args in [
+        &["-c", "%U\n%G"][..],   // GNU stat (Linux)
+        &["-f", "%Su\n%Sg"][..], // BSD stat (macOS)
+    ] {
+        if let Ok(out) = Command::new("stat").args(args).arg(path).output().await {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                let mut lines = text.trim().lines();
+                return (
+                    lines.next().filter(|s| !s.is_empty()).map(str::to_string),
+                    lines.next().filter(|s| !s.is_empty()).map(str::to_string),
+                );
+            }
+        }
+    }
+    (None, None)
+}
+
+/// Returns the disk size of `path` as a human-readable string (e.g. `"4.2 MB"`).
+///
+/// Uses `du -sh` which is available on both Linux and macOS.
+/// Falls back to an empty string on failure.
+pub async fn repo_size(path: &Path) -> String {
+    Command::new("du")
+        .args(["-sh", &path.to_string_lossy()])
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8(o.stdout)
+                .ok()
+                .and_then(|s| s.split_whitespace().next().map(str::to_string))
+        })
+        .unwrap_or_default()
+}
+
+/// Normalizes a git remote URL to an `https://` URL.
+///
+/// Handles SCP-style (`git@github.com:user/repo`) and `ssh://` URLs, converting
+/// them to their `https://` equivalents so they can be used in clickable links.
+/// Plain `https://` or `http://` URLs are returned unchanged.
+fn normalize_to_https(url: &str) -> String {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return url.to_string();
+    } else if let Some(rest) = url.strip_prefix("git@") {
+        // SCP-style: git@github.com:user/repo.git
+        if let Some(colon_pos) = rest.find(':') {
+            return format!("https://{}/{}", &rest[..colon_pos], &rest[colon_pos + 1..]);
+        }
+    } else if let Some(rest) = url.strip_prefix("ssh://git@") {
+        return format!("https://{rest}");
+    } else if let Some(rest) = url.strip_prefix("ssh://") {
+        return format!("https://{rest}");
+    }
+    url.to_string()
+}
+
+/// Returns the remote URL for `origin`, if one is configured.
+///
+/// Runs `git remote get-url origin` — if the repo has no remote or the command
+/// fails, returns `None`. SCP-style and ssh:// URLs are normalized to https://.
+pub async fn git_remote_url(repo_path: &Path) -> Option<String> {
+    run_git(repo_path, &["remote", "get-url", "origin"])
+        .await
+        .ok()
+        .map(|s| normalize_to_https(s.trim()))
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_https_passthrough() {
+        assert_eq!(
+            normalize_to_https("https://github.com/user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+        assert_eq!(
+            normalize_to_https("http://example.com/repo"),
+            "http://example.com/repo"
+        );
+    }
+
+    #[test]
+    fn normalize_scp_style() {
+        assert_eq!(
+            normalize_to_https("git@github.com:user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+        assert_eq!(
+            normalize_to_https("git@gitlab.com:org/project"),
+            "https://gitlab.com/org/project"
+        );
+    }
+
+    #[test]
+    fn normalize_ssh_git_at_style() {
+        assert_eq!(
+            normalize_to_https("ssh://git@github.com/user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+    }
+
+    #[test]
+    fn normalize_ssh_style() {
+        assert_eq!(
+            normalize_to_https("ssh://github.com/user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+    }
 
     #[test]
     fn is_remote_url_https() {
@@ -578,14 +724,20 @@ mod tests {
 
     #[test]
     fn repo_name_from_url_https() {
-        assert_eq!(repo_name_from_url("https://github.com/user/repo.git"), "repo");
+        assert_eq!(
+            repo_name_from_url("https://github.com/user/repo.git"),
+            "repo"
+        );
         assert_eq!(repo_name_from_url("https://github.com/user/repo"), "repo");
     }
 
     #[test]
     fn repo_name_from_url_scp() {
         assert_eq!(repo_name_from_url("git@github.com:user/repo.git"), "repo");
-        assert_eq!(repo_name_from_url("git@gitlab.com:org/myproject"), "myproject");
+        assert_eq!(
+            repo_name_from_url("git@gitlab.com:org/myproject"),
+            "myproject"
+        );
     }
 
     #[tokio::test]

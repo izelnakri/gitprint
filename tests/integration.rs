@@ -78,6 +78,7 @@ fn test_config(repo_path: PathBuf, output_path: PathBuf) -> Config {
         commit: None,
         paper_size: PaperSize::A4,
         landscape: false,
+        remote_url: None,
     }
 }
 

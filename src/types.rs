@@ -24,6 +24,8 @@ pub struct Config {
     pub commit: Option<String>,
     pub paper_size: PaperSize,
     pub landscape: bool,
+    /// Original remote URL when input was a remote repository, used for GitHub links.
+    pub remote_url: Option<String>,
 }
 
 impl Config {
@@ -43,6 +45,7 @@ impl Config {
             commit: None,
             paper_size: PaperSize::A4,
             landscape: false,
+            remote_url: None,
         }
     }
 }
@@ -56,8 +59,25 @@ pub struct RepoMetadata {
     pub commit_hash_short: String,
     pub commit_date: String,
     pub commit_message: String,
+    pub commit_author: String,
+    /// Email address of the last committer.
+    pub commit_author_email: String,
     pub file_count: usize,
     pub total_lines: usize,
+    /// Filesystem owner of the input path (local paths only).
+    pub fs_owner: Option<String>,
+    /// Filesystem group of the input path (local paths only).
+    pub fs_group: Option<String>,
+    /// UTC timestamp when this PDF was generated.
+    pub generated_at: String,
+    /// Human-readable size of the repo/folder on disk (e.g. "4.2 MB").
+    pub repo_size: String,
+    /// Remote URL detected from git config (e.g. `git remote get-url origin`).
+    /// Used to generate commit/author links even when `Config::remote_url` is None.
+    pub detected_remote_url: Option<String>,
+    /// Absolute filesystem path to the repo root (local repos only, `None` for remote clones).
+    /// Used to generate `file://` links on the cover page.
+    pub repo_absolute_path: Option<PathBuf>,
 }
 
 /// An RGB color value.
@@ -111,8 +131,16 @@ mod tests {
             commit_hash_short: "abc1234".to_string(),
             commit_date: "2024-01-01".to_string(),
             commit_message: "init".to_string(),
+            commit_author: "Alice".to_string(),
+            commit_author_email: "alice@example.com".to_string(),
             file_count: 10,
             total_lines: 500,
+            fs_owner: None,
+            fs_group: None,
+            generated_at: "2024-01-15 10:00:00 UTC".to_string(),
+            repo_size: "1.2 MB".to_string(),
+            detected_remote_url: None,
+            repo_absolute_path: None,
         };
         let cloned = meta.clone();
         assert_eq!(cloned.name, "test");
