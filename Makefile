@@ -39,13 +39,9 @@ doc:
 release: fix check
 	@printf "\n=== Release Preview (level: $(LEVEL)) ===\n\n"; \
 	git-cliff --bump --unreleased 2>/dev/null || true; \
-	printf "\nProceed with $(LEVEL) release? [y/N] "; \
-	read confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
-		git-cliff --bump -o CHANGELOG.md && \
-		git add CHANGELOG.md && \
-		cargo release $(LEVEL) --execute; \
-	else \
-		echo "Aborted."; \
-		exit 1; \
-	fi
+	printf "\nProceed with $(LEVEL) release? [y/N] " > /dev/tty; \
+	read confirm < /dev/tty; \
+	case "$$confirm" in \
+		[yY]*) cargo release $(LEVEL) --execute ;; \
+		*) echo "Aborted."; exit 1 ;; \
+	esac
