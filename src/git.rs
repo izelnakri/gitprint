@@ -10,6 +10,92 @@ use tokio::process::Command;
 
 use crate::types::{Config, RepoMetadata};
 
+/// Returns `true` if `s` looks like a remote git URL.
+///
+/// Recognised schemes: `https://`, `http://`, `git://`, `ssh://`,
+/// and SCP-style `git@host:path` used by GitHub/GitLab.
+pub fn is_remote_url(s: &str) -> bool {
+    s.starts_with("https://")
+        || s.starts_with("http://")
+        || s.starts_with("git://")
+        || s.starts_with("ssh://")
+        || (s.contains('@') && s.contains(':') && !s.starts_with('/'))
+}
+
+/// Extracts the repository name from a remote URL.
+///
+/// `https://github.com/user/repo.git` → `"repo"`
+/// `git@github.com:user/repo`         → `"repo"`
+pub fn repo_name_from_url(url: &str) -> String {
+    url.split(['/', ':'])
+        .last()
+        .unwrap_or("repo")
+        .trim_end_matches(".git")
+        .to_string()
+}
+
+/// A temporary directory that deletes itself on drop.
+pub struct TempCloneDir(PathBuf);
+
+impl TempCloneDir {
+    pub async fn new() -> anyhow::Result<Self> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("gitprint-{nanos}"));
+        tokio::fs::create_dir_all(&dir).await?;
+        Ok(Self(dir))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempCloneDir {
+    fn drop(&mut self) {
+        // Drop is synchronous by design — tokio async cannot be used here.
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Clones a remote git repository into `dest`.
+///
+/// Uses `--depth=1` (shallow) for speed unless `commit` is specified, in which
+/// case a full clone is required to access arbitrary history.
+pub async fn clone_repo(
+    url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    commit: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut cmd = Command::new("git");
+    cmd.arg("clone");
+
+    if commit.is_none() {
+        cmd.arg("--depth=1");
+        if let Some(b) = branch {
+            cmd.args(["--branch", b, "--single-branch"]);
+        }
+    } else if let Some(b) = branch {
+        cmd.args(["--branch", b]);
+    }
+
+    let status = cmd
+        .arg(url)
+        .arg(dest)
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to run git: {e}"))?;
+
+    if !status.success() {
+        bail!("git clone failed for {url}");
+    }
+    Ok(())
+}
+
 async fn run_git(repo_path: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new("git")
         .args(["-C", &repo_path.to_string_lossy()])
@@ -457,4 +543,59 @@ async fn walk_dates_async(root: PathBuf) -> anyhow::Result<HashMap<PathBuf, Stri
     });
 
     Ok(set.join_all().await.into_iter().flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_remote_url_https() {
+        assert!(is_remote_url("https://github.com/user/repo"));
+        assert!(is_remote_url("https://github.com/user/repo.git"));
+        assert!(is_remote_url("http://example.com/repo.git"));
+    }
+
+    #[test]
+    fn is_remote_url_git_schemes() {
+        assert!(is_remote_url("git://github.com/user/repo.git"));
+        assert!(is_remote_url("ssh://git@github.com/user/repo.git"));
+    }
+
+    #[test]
+    fn is_remote_url_scp_style() {
+        assert!(is_remote_url("git@github.com:user/repo.git"));
+        assert!(is_remote_url("git@gitlab.com:org/repo"));
+    }
+
+    #[test]
+    fn is_remote_url_rejects_local() {
+        assert!(!is_remote_url("."));
+        assert!(!is_remote_url("/home/user/repo"));
+        assert!(!is_remote_url("relative/path"));
+        assert!(!is_remote_url("src/main.rs"));
+    }
+
+    #[test]
+    fn repo_name_from_url_https() {
+        assert_eq!(repo_name_from_url("https://github.com/user/repo.git"), "repo");
+        assert_eq!(repo_name_from_url("https://github.com/user/repo"), "repo");
+    }
+
+    #[test]
+    fn repo_name_from_url_scp() {
+        assert_eq!(repo_name_from_url("git@github.com:user/repo.git"), "repo");
+        assert_eq!(repo_name_from_url("git@gitlab.com:org/myproject"), "myproject");
+    }
+
+    #[tokio::test]
+    async fn temp_clone_dir_creates_and_cleans_up() {
+        let path = {
+            let t = TempCloneDir::new().await.unwrap();
+            let p = t.path().to_path_buf();
+            assert!(p.exists());
+            p
+        };
+        assert!(!path.exists());
+    }
 }

@@ -1,5 +1,6 @@
-use clap::Parser;
 use std::path::PathBuf;
+
+use clap::Parser;
 
 use crate::types::PaperSize;
 
@@ -12,8 +13,8 @@ use crate::types::PaperSize;
     after_help = after_help_text(),
 )]
 pub struct Args {
-    /// Path to git repository or directory
-    pub path: PathBuf,
+    /// Path to a git repository, directory, file, or remote URL (https://, git@, ssh://)
+    pub path: String,
 
     /// Output PDF file path
     #[arg(short, long)]
@@ -101,13 +102,25 @@ mod tests {
     #[test]
     fn accepts_path() {
         let args = Args::parse_from(["gitprint", "."]);
-        assert_eq!(args.path, PathBuf::from("."));
+        assert_eq!(args.path, ".");
     }
 
     #[test]
     fn custom_path() {
         let args = Args::parse_from(["gitprint", "/tmp/repo"]);
-        assert_eq!(args.path, PathBuf::from("/tmp/repo"));
+        assert_eq!(args.path, "/tmp/repo");
+    }
+
+    #[test]
+    fn accepts_https_url() {
+        let args = Args::parse_from(["gitprint", "https://github.com/user/repo"]);
+        assert_eq!(args.path, "https://github.com/user/repo");
+    }
+
+    #[test]
+    fn accepts_ssh_url() {
+        let args = Args::parse_from(["gitprint", "git@github.com:user/repo.git"]);
+        assert_eq!(args.path, "git@github.com:user/repo.git");
     }
 
     #[test]
@@ -126,7 +139,7 @@ mod tests {
     fn all_flags() {
         let args = Args::parse_from([
             "gitprint",
-            "/tmp/repo",
+            "https://github.com/user/repo",
             "-o",
             "out.pdf",
             "--theme",
@@ -143,7 +156,7 @@ mod tests {
             "--landscape",
             "--list-themes",
         ]);
-        assert_eq!(args.path, PathBuf::from("/tmp/repo"));
+        assert_eq!(args.path, "https://github.com/user/repo");
         assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
         assert_eq!(args.theme, "Solarized (dark)");
         assert_eq!(args.font_size, 10.0);
