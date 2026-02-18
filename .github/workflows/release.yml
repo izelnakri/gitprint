@@ -47,9 +47,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Toolchain version comes from rust-toolchain.toml; targets are per-matrix.
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      # Belt-and-suspenders: ensure the target stdlib is installed even on a cold
+      # tool-cache (e.g. after a version bump in rust-toolchain.toml). cross builds
+      # use their own Docker image so only native builds need this.
+      - name: Ensure Rust target stdlib is installed
+        if: "!matrix.cross"
+        run: rustup target add ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:

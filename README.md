@@ -1,5 +1,11 @@
 # gitprint
 
+[![CI](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml/badge.svg)](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/izelnakri/gitprint)](https://github.com/izelnakri/gitprint/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/izelnakri/gitprint/total)](https://github.com/izelnakri/gitprint/releases)
+[![Docs](https://img.shields.io/badge/docs-online-blue)](https://izelnakri.github.io/gitprint/docs/gitprint/)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-pink)](https://github.com/sponsors/izelnakri)
+
 Convert git repositories into beautifully formatted, printer-friendly PDFs.
 
 ## Features
