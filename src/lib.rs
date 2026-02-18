@@ -137,10 +137,11 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
         let pages = builder.finish();
         let total_pages = pages.len();
         doc.with_pages(pages);
-        pdf::save_pdf(&doc, &config.output_path)?;
+        pdf::save_pdf(&doc, &config.output_path).await?;
 
         let elapsed = start.elapsed();
-        let pdf_size = std::fs::metadata(&config.output_path)
+        let pdf_size = tokio::fs::metadata(&config.output_path)
+            .await
             .map(|m| m.len())
             .unwrap_or(0);
         eprintln!(
@@ -338,10 +339,11 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     let total_pages = all_pages.len();
 
     doc.with_pages(all_pages);
-    pdf::save_pdf(&doc, &config.output_path)?;
+    pdf::save_pdf(&doc, &config.output_path).await?;
 
     let elapsed = start.elapsed();
-    let pdf_size = std::fs::metadata(&config.output_path)
+    let pdf_size = tokio::fs::metadata(&config.output_path)
+        .await
         .map(|m| m.len())
         .unwrap_or(0);
 

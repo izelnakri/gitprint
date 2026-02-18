@@ -80,6 +80,8 @@
             pkgs.git
             pkgs.cargo-watch
             pkgs.cargo-edit
+            pkgs.git-cliff
+            pkgs.cargo-release
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";

@@ -35,10 +35,10 @@ pub fn create_builder_at_page(
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
 }
 
-pub fn save_pdf(doc: &PdfDocument, path: &Path) -> anyhow::Result<()> {
+pub async fn save_pdf(doc: &PdfDocument, path: &Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
-    std::fs::write(path, bytes).map_err(Into::into)
+    tokio::fs::write(path, bytes).await.map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -72,8 +72,8 @@ mod tests {
         assert_eq!(h.0, 210.0);
     }
 
-    #[test]
-    fn save_pdf_to_tempfile() {
+    #[tokio::test]
+    async fn save_pdf_to_tempfile() {
         let mut doc = PdfDocument::new("test");
         let fonts = fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
@@ -82,16 +82,16 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.pdf");
-        assert!(save_pdf(&doc, &path).is_ok());
+        assert!(save_pdf(&doc, &path).await.is_ok());
         assert!(path.exists());
         assert!(std::fs::metadata(&path).unwrap().len() > 0);
     }
 
-    #[test]
-    fn save_pdf_invalid_path() {
+    #[tokio::test]
+    async fn save_pdf_invalid_path() {
         let mut doc = PdfDocument::new("test");
         let _ = fonts::load_fonts(&mut doc).unwrap();
-        let result = save_pdf(&doc, Path::new("/nonexistent/dir/test.pdf"));
+        let result = save_pdf(&doc, Path::new("/nonexistent/dir/test.pdf")).await;
         assert!(result.is_err());
     }
 }

@@ -4,12 +4,14 @@ Rust CLI that converts git repositories into syntax-highlighted, printer-friendl
 
 ## Build & Test
 
-- `cargo build` — build the project
-- `cargo test` — run all tests (unit + integration)
-- `cargo clippy --all-targets -- -D warnings` — lint
-- `cargo fmt -- --check` — check formatting
+- `make check` — fmt check + clippy + tests (run before every commit)
+- `make build` — build the project
+- `make test` — run all tests (unit + integration)
+- `make fmt` — format source code
+- `make doc` — build and open API docs
+- `make release [LEVEL=patch|minor|major]` — generate CHANGELOG and publish
 - `nix flake check` — run all CI checks (build, clippy, fmt, tests)
-- `nix develop` — enter development shell
+- `nix develop` — enter development shell (includes git-cliff, cargo-release)
 
 ## Architecture
 

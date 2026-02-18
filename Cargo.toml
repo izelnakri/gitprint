@@ -4,6 +4,11 @@ version = "0.1.2"
 edition = "2024"
 description = "Convert git repositories into beautifully formatted, printer-friendly PDFs"
 license = "MIT"
+repository = "https://github.com/izelnakri/gitprint"
+homepage = "https://github.com/izelnakri/gitprint"
+readme = "README.md"
+keywords = ["pdf", "git", "syntax-highlighting", "printing", "code"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1"

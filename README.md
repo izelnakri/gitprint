@@ -1,8 +1,8 @@
 # gitprint
 
 [![CI](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml/badge.svg)](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/izelnakri/gitprint)](https://github.com/izelnakri/gitprint/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/izelnakri/gitprint/total)](https://github.com/izelnakri/gitprint/releases)
+[![Crate](https://img.shields.io/crates/v/gitprint)](https://crates.io/crates/gitprint)
+[![Downloads](https://img.shields.io/crates/d/gitprint)](https://crates.io/crates/gitprint)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://izelnakri.github.io/gitprint/docs/gitprint/)
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-pink)](https://github.com/sponsors/izelnakri)
 
@@ -105,18 +105,14 @@ Options:
 ## Development
 
 ```sh
-nix develop   # Enter dev shell with Rust toolchain and tools
-cargo build   # Build
-cargo test    # Run all tests
+nix develop        # Enter dev shell (Rust toolchain, git-cliff, cargo-release)
+make check         # Fmt check + clippy + tests (run before every commit)
+make build         # Build
+make test          # Run tests
+make doc           # Build and open API docs
+make release       # Bump CHANGELOG + publish (LEVEL=patch|minor|major)
+nix flake check    # Full CI suite: build, clippy, fmt, tests
 ```
-
-## Running CI Locally
-
-```sh
-nix flake check
-```
-
-This runs the full check suite: package build, clippy lints, rustfmt, and tests.
 
 ## Donate
 
