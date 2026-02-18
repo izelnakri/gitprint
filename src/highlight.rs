@@ -4,16 +4,35 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-use crate::error::Error;
 use crate::types::{HighlightedLine, HighlightedToken, RgbColor};
 
+/// Syntax highlighter backed by the bundled syntect theme and syntax sets.
 pub struct Highlighter {
     syntax_set: SyntaxSet,
     theme: syntect::highlighting::Theme,
 }
 
 impl Highlighter {
-    pub fn new(theme_name: &str) -> Result<Self, Error> {
+    /// Creates a new `Highlighter` using the named syntect theme.
+    ///
+    /// Theme names are the keys returned by [`list_themes`]. Pass `"InspiredGitHub"` for
+    /// the default light theme.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `theme_name` is not found in the bundled theme set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gitprint::highlight::Highlighter;
+    ///
+    /// let hl = Highlighter::new("InspiredGitHub").unwrap();
+    ///
+    /// let err = Highlighter::new("no-such-theme").err().unwrap();
+    /// assert!(err.to_string().contains("no-such-theme"));
+    /// ```
+    pub fn new(theme_name: &str) -> anyhow::Result<Self> {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
 
@@ -21,13 +40,31 @@ impl Highlighter {
             .themes
             .get(theme_name)
             .cloned()
-            .ok_or_else(|| Error::ThemeNotFound(theme_name.to_string()))?;
+            .ok_or_else(|| anyhow::anyhow!(
+                "theme not found: {theme_name} (use --list-themes to see available themes)"
+            ))?;
 
         Ok(Self { syntax_set, theme })
     }
 
-    /// Returns a lazy iterator that yields one highlighted line at a time.
-    /// Only one line's worth of tokens exists in memory at any point.
+    /// Returns a lazy iterator that yields one [`HighlightedLine`] at a time.
+    ///
+    /// Syntax is detected from the file extension of `path`; unknown extensions fall
+    /// back to plain text. Line numbers start at 1.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gitprint::highlight::Highlighter;
+    /// use std::path::Path;
+    ///
+    /// let hl = Highlighter::new("InspiredGitHub").unwrap();
+    /// let lines: Vec<_> = hl.highlight_lines("fn main() {}", Path::new("main.rs")).collect();
+    ///
+    /// assert_eq!(lines.len(), 1);
+    /// assert_eq!(lines[0].line_number, 1);
+    /// assert!(!lines[0].tokens.is_empty());
+    /// ```
     pub fn highlight_lines<'a>(
         &'a self,
         content: &'a str,
@@ -70,6 +107,17 @@ impl Highlighter {
     }
 }
 
+/// Returns all available theme names in sorted order.
+///
+/// # Examples
+///
+/// ```
+/// use gitprint::highlight::list_themes;
+///
+/// let themes = list_themes();
+/// assert!(themes.contains(&"InspiredGitHub".to_string()));
+/// assert!(themes.windows(2).all(|w| w[0] <= w[1])); // sorted
+/// ```
 pub fn list_themes() -> Vec<String> {
     let mut themes: Vec<_> = ThemeSet::load_defaults().themes.into_keys().collect();
     themes.sort();
@@ -93,7 +141,8 @@ mod tests {
     #[test]
     fn new_with_invalid_theme() {
         let result = Highlighter::new("NonExistentTheme");
-        assert!(matches!(result, Err(Error::ThemeNotFound(_))));
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("NonExistentTheme"));
     }
 
     #[test]
@@ -150,7 +199,6 @@ mod tests {
         let content = "fn main() {\n    let x = 42;\n}";
         let lines: Vec<_> = h.highlight_lines(content, Path::new("main.rs")).collect();
         assert_eq!(lines.len(), 3);
-        // Rust keywords should produce tokens with styling
         assert!(!lines[0].tokens.is_empty());
     }
 
@@ -159,7 +207,6 @@ mod tests {
         let h = Highlighter::new("InspiredGitHub").unwrap();
         let lines: Vec<_> = h.highlight_lines("let x = 1;", Path::new("t.rs")).collect();
         lines[0].tokens.iter().for_each(|token| {
-            // RGB values should be valid (0-255 is guaranteed by u8)
             let _ = (token.color.r, token.color.g, token.color.b);
         });
     }

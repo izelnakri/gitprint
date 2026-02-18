@@ -5,22 +5,22 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
+use anyhow::bail;
 use tokio::process::Command;
 
-use crate::error::Error;
 use crate::types::{Config, RepoMetadata};
 
-async fn run_git(repo_path: &Path, args: &[&str]) -> Result<String, Error> {
+async fn run_git(repo_path: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new("git")
         .args(["-C", &repo_path.to_string_lossy()])
         .args(args)
         .output()
         .await
-        .map_err(|e| Error::Git(format!("failed to run git: {e}")))?;
+        .map_err(|e| anyhow::anyhow!("failed to run git: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::Git(stderr.trim().to_string()));
+        bail!("{}", stderr.trim());
     }
 
     Ok(String::from_utf8(output.stdout)
@@ -41,22 +41,48 @@ pub struct RepoInfo {
     pub single_file: Option<PathBuf>,
 }
 
-/// Resolves the user-supplied path into a `RepoInfo`.
+/// Resolves a user-supplied path into a [`RepoInfo`].
 ///
-/// - File inside git repo  → `{ root: repo_root, is_git: true,  single_file: Some(rel) }`
-/// - Subdir inside git repo → `{ root: repo_root, is_git: true,  scope: Some(rel) }`
-/// - Git repo root          → `{ root: repo_root, is_git: true  }`
-/// - Plain directory        → `{ root: canonical, is_git: false }`
-/// - File outside git       → `{ root: parent,   is_git: false, single_file: Some(name) }`
-pub async fn verify_repo(path: &Path) -> Result<RepoInfo, Error> {
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|_| Error::Git(format!("{}: path not found", path.display())))?;
+/// Handles four cases:
+///
+/// - File inside a git repo → `single_file` is set, `root` is the repo root.
+/// - Subdirectory inside a git repo → `scope` is set relative to `root`.
+/// - Git repo root → `root` is the repo root, no scope.
+/// - Plain directory or file outside git → `is_git` is `false`.
+///
+/// # Errors
+///
+/// Returns an error if the path does not exist.
+///
+/// # Examples
+///
+/// ```ignore
+/// use gitprint::git::verify_repo;
+/// use std::path::Path;
+///
+/// let info = verify_repo(Path::new(".")).await.unwrap();
+/// println!("repo root: {}", info.root.display());
+/// println!("is git: {}", info.is_git);
+/// ```
+pub async fn verify_repo(path: &Path) -> anyhow::Result<RepoInfo> {
+    // Use async canonicalize to avoid blocking tokio worker threads.
+    let canonical = tokio::fs::canonicalize(path)
+        .await
+        .map_err(|_| anyhow::anyhow!("{}: path not found", path.display()))?;
+
+    // Fetch metadata once (async stat) and reuse is_file/is_dir throughout —
+    // avoids multiple blocking stat() calls on the same already-resolved path.
+    let meta = tokio::fs::metadata(&canonical)
+        .await
+        .map_err(|_| anyhow::anyhow!("{}: cannot stat path", canonical.display()))?;
+    let is_file = meta.is_file();
+    let is_dir = meta.is_dir();
 
     // Git must be invoked from a directory; use parent when the path is a file.
-    let git_dir = if canonical.is_file() {
+    let git_dir = if is_file {
         canonical
             .parent()
-            .ok_or_else(|| Error::Git("file has no parent directory".to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("file has no parent directory"))?
             .to_path_buf()
     } else {
         canonical.clone()
@@ -67,15 +93,15 @@ pub async fn verify_repo(path: &Path) -> Result<RepoInfo, Error> {
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .await
-        .map_err(|e| Error::Git(format!("failed to run git: {e}")))?;
+        .map_err(|e| anyhow::anyhow!("failed to run git: {e}"))?;
 
     if output.status.success() {
         let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
 
-        if canonical.is_file() {
+        if is_file {
             let rel = canonical
                 .strip_prefix(&root)
-                .map_err(|_| Error::Git("file is outside the git repository".to_string()))?
+                .map_err(|_| anyhow::anyhow!("file is outside the git repository"))?
                 .to_path_buf();
             return Ok(RepoInfo {
                 root,
@@ -97,10 +123,10 @@ pub async fn verify_repo(path: &Path) -> Result<RepoInfo, Error> {
     }
 
     // Not inside a git repo.
-    if canonical.is_file() {
+    if is_file {
         let parent = canonical
             .parent()
-            .ok_or_else(|| Error::Git("file has no parent directory".to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("file has no parent directory"))?
             .to_path_buf();
         return Ok(RepoInfo {
             root: parent,
@@ -110,7 +136,7 @@ pub async fn verify_repo(path: &Path) -> Result<RepoInfo, Error> {
         });
     }
 
-    if canonical.is_dir() {
+    if is_dir {
         return Ok(RepoInfo {
             root: canonical,
             is_git: false,
@@ -119,18 +145,23 @@ pub async fn verify_repo(path: &Path) -> Result<RepoInfo, Error> {
         });
     }
 
-    Err(Error::Git(format!(
-        "{}: not a git repository, directory, or file",
-        path.display()
-    )))
+    bail!("{}: not a git repository, directory, or file", path.display())
 }
 
+/// Fetches repository metadata: branch, last commit hash/date/message, and name.
+///
+/// For non-git directories, returns a `RepoMetadata` with empty git fields.
+/// Branch detection and commit log are fetched concurrently.
+///
+/// # Errors
+///
+/// Returns an error if the git command fails (git repos only).
 pub async fn get_metadata(
     repo_path: &Path,
     config: &Config,
     is_git: bool,
     scope: Option<&Path>,
-) -> Result<RepoMetadata, Error> {
+) -> anyhow::Result<RepoMetadata> {
     let base = repo_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -193,12 +224,20 @@ pub async fn get_metadata(
     })
 }
 
+/// Lists all files to be included in the PDF.
+///
+/// In git mode: uses `git ls-files` (working tree) or `git ls-tree` (specific
+/// branch/commit). In plain-directory mode: recursively walks the filesystem.
+///
+/// # Errors
+///
+/// Returns an error if the git command or directory walk fails.
 pub async fn list_tracked_files(
     repo_path: &Path,
     config: &Config,
     is_git: bool,
     scope: Option<&Path>,
-) -> Result<Vec<PathBuf>, Error> {
+) -> anyhow::Result<Vec<PathBuf>> {
     if !is_git {
         return walk_files_async(repo_path.to_path_buf()).await;
     }
@@ -245,7 +284,7 @@ pub async fn file_last_modified_dates(
     config: &Config,
     is_git: bool,
     scope: Option<&Path>,
-) -> Result<HashMap<PathBuf, String>, Error> {
+) -> anyhow::Result<HashMap<PathBuf, String>> {
     if !is_git {
         return walk_dates_async(repo_path.to_path_buf()).await;
     }
@@ -325,7 +364,7 @@ pub async fn read_file_content(
     repo_path: &Path,
     file_path: &Path,
     config: &Config,
-) -> Result<String, Error> {
+) -> anyhow::Result<String> {
     let rev = config.commit.as_deref().or(config.branch.as_deref());
     match rev {
         Some(rev) => {
@@ -334,7 +373,7 @@ pub async fn read_file_content(
         }
         None => tokio::fs::read_to_string(repo_path.join(file_path))
             .await
-            .map_err(Error::Io),
+            .map_err(Into::into),
     }
 }
 
@@ -362,15 +401,15 @@ fn unix_secs_to_ymd(secs: u64) -> (u32, u32, u32) {
 fn walk_files_inner(
     root: Arc<PathBuf>,
     dir: PathBuf,
-) -> Pin<Box<dyn Future<Output = Result<Vec<PathBuf>, Error>> + Send>> {
+) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
     Box::pin(async move {
-        let mut rd = tokio::fs::read_dir(&dir).await.map_err(Error::Io)?;
+        let mut rd = tokio::fs::read_dir(&dir).await?;
         let mut files: Vec<PathBuf> = Vec::new();
-        let mut set: tokio::task::JoinSet<Result<Vec<PathBuf>, Error>> =
+        let mut set: tokio::task::JoinSet<anyhow::Result<Vec<PathBuf>>> =
             tokio::task::JoinSet::new();
 
-        while let Some(entry) = rd.next_entry().await.map_err(Error::Io)? {
-            let ft = entry.file_type().await.map_err(Error::Io)?;
+        while let Some(entry) = rd.next_entry().await? {
+            let ft = entry.file_type().await?;
             if ft.is_dir() {
                 set.spawn(walk_files_inner(Arc::clone(&root), entry.path()));
             } else if ft.is_file()
@@ -389,12 +428,12 @@ fn walk_files_inner(
     })
 }
 
-async fn walk_files_async(root: PathBuf) -> Result<Vec<PathBuf>, Error> {
+async fn walk_files_async(root: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
     walk_files_inner(Arc::new(root.clone()), root).await
 }
 
 /// Walk the tree (via `walk_files_async`) then fetch all file mtimes concurrently.
-async fn walk_dates_async(root: PathBuf) -> Result<HashMap<PathBuf, String>, Error> {
+async fn walk_dates_async(root: PathBuf) -> anyhow::Result<HashMap<PathBuf, String>> {
     let files = walk_files_async(root.clone()).await?;
     let mut set: tokio::task::JoinSet<Option<(PathBuf, String)>> = tokio::task::JoinSet::new();
 

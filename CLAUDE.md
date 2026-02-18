@@ -18,12 +18,11 @@ Single-binary CLI. Pipeline: git → filter → highlight → PDF.
 Modules:
 - `cli.rs` — Clap argument parsing
 - `types.rs` — Shared data types (Config, RepoMetadata, PaperSize, etc.)
-- `error.rs` — Error types via thiserror
 - `git.rs` — Git operations via `git` CLI subprocess
 - `filter.rs` — Glob-based file filtering + binary/minified detection
 - `defaults.rs` — Default exclude glob patterns
 - `highlight.rs` — Syntax highlighting via syntect
-- `pdf/` — PDF generation via genpdfi
+- `pdf/` — PDF generation via printpdf
   - `mod.rs` — Document creation and writing
   - `fonts.rs` — Embedded JetBrains Mono font loading
   - `cover.rs` — Cover page rendering
@@ -36,7 +35,7 @@ Modules:
 ## Conventions
 
 - Edition 2024
-- Error handling: thiserror for typed library errors
+- Error handling: anyhow for ergonomic error propagation throughout
 - Tests: inline `#[cfg(test)] mod tests` for unit tests, `tests/` directory for integration tests
 - Integration tests use `tempfile` crate to create temporary git repos
 - No unsafe code

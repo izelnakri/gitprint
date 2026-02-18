@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use gitprint::filter::FileFilter;
 use gitprint::highlight::Highlighter;

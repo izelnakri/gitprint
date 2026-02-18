@@ -1,7 +1,8 @@
 name: Publish PDF
 
 # Builds a syntax-highlighted PDF of the gitprint source and deploys it to GitHub Pages
-# on every push to main. The live PDF is browsable at https://<user>.github.io/gitprint/
+# on every push to main. The live PDF is at https://<user>.github.io/gitprint/
+# and rustdoc is at https://<user>.github.io/gitprint/docs
 
 on:
   push:
@@ -39,12 +40,16 @@ jobs:
       - name: Generate PDF
         run: ./target/release/gitprint . --output gitprint.pdf
 
+      - name: Generate rustdoc
+        run: cargo doc --no-deps
+
       - name: Assemble site
         env:
           REPO: ${{ github.repository }}
         run: |
-          mkdir -p _site
+          mkdir -p _site/docs
           cp gitprint.pdf _site/gitprint.pdf
+          cp -r target/doc/. _site/docs/
           touch _site/.nojekyll
           cat > _site/index.html << HTMLEOF
           <!DOCTYPE html>
@@ -69,6 +74,7 @@ jobs:
               <h1>gitprint</h1>
               <a href="https://github.com/${REPO}">source</a>
               <a href="gitprint.pdf">download PDF</a>
+              <a href="docs/gitprint/index.html">API docs</a>
             </header>
             <embed src="gitprint.pdf" type="application/pdf">
           </body>

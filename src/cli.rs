@@ -9,7 +9,7 @@ use crate::types::PaperSize;
     about = "Convert git repositories into beautifully formatted PDFs",
     version,
     arg_required_else_help = true,
-    after_help = binary_size_info(),
+    after_help = after_help_text(),
 )]
 pub struct Args {
     /// Path to git repository or directory
@@ -68,10 +68,10 @@ pub struct Args {
     pub list_themes: bool,
 }
 
-fn binary_size_info() -> &'static str {
-    static INFO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    INFO.get_or_init(|| {
-        std::env::current_exe()
+fn after_help_text() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let size_line = std::env::current_exe()
             .ok()
             .and_then(|p| std::fs::metadata(p).ok())
             .map(|m| {
@@ -81,9 +81,10 @@ fn binary_size_info() -> &'static str {
                 } else {
                     (bytes as f64 / 1_024.0, "KB")
                 };
-                format!("Binary size: {size:.1} {unit}")
+                format!("Binary size: {size:.1} {unit}\n")
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        format!("{size_line}Sponsor: https://github.com/sponsors/izelnakri")
     })
 }
 

@@ -1,4 +1,4 @@
-use printpdf::{Color, FontId, Mm, Op, PdfPage, Pt, Rgb, TextItem, graphics::Point};
+use printpdf::{Color, FontId, Mm, Op, PdfFontHandle, PdfPage, Pt, Rgb, TextItem, graphics::Point};
 
 /// A styled text span within a line.
 pub struct Span {
@@ -113,13 +113,12 @@ impl PageBuilder {
             Op::SetFillColor {
                 col: Color::Rgb(Rgb::new(0.5, 0.5, 0.5, None)),
             },
-            Op::SetFontSize {
+            Op::SetFont {
                 size: Pt(7.0),
-                font: header_font.clone(),
+                font: PdfFontHandle::External(header_font.clone()),
             },
-            Op::WriteText {
+            Op::ShowText {
                 items: vec![TextItem::Text(header_text)],
-                font: header_font,
             },
             Op::EndTextSection,
         ]);
@@ -164,13 +163,12 @@ impl PageBuilder {
                 Op::SetFillColor {
                     col: span.color.clone(),
                 },
-                Op::SetFontSize {
+                Op::SetFont {
                     size: span.size,
-                    font: span.font_id.clone(),
+                    font: PdfFontHandle::External(span.font_id.clone()),
                 },
-                Op::WriteText {
+                Op::ShowText {
                     items: vec![TextItem::Text(span.text.clone())],
-                    font: span.font_id.clone(),
                 },
             ]
         }));
@@ -198,13 +196,12 @@ impl PageBuilder {
                 },
             },
             Op::SetFillColor { col: color },
-            Op::SetFontSize {
+            Op::SetFont {
                 size,
-                font: font_id.clone(),
+                font: PdfFontHandle::External(font_id.clone()),
             },
-            Op::WriteText {
+            Op::ShowText {
                 items: vec![TextItem::Text(text.to_string())],
-                font: font_id.clone(),
             },
             Op::EndTextSection,
         ]);
@@ -233,13 +230,12 @@ impl PageBuilder {
                 Op::SetFillColor {
                     col: span.color.clone(),
                 },
-                Op::SetFontSize {
+                Op::SetFont {
                     size: span.size,
-                    font: span.font_id.clone(),
+                    font: PdfFontHandle::External(span.font_id.clone()),
                 },
-                Op::WriteText {
+                Op::ShowText {
                     items: vec![TextItem::Text(span.text.clone())],
-                    font: span.font_id.clone(),
                 },
             ]
         }));
@@ -266,13 +262,12 @@ impl PageBuilder {
                 Op::SetFillColor {
                     col: span.color.clone(),
                 },
-                Op::SetFontSize {
+                Op::SetFont {
                     size: span.size,
-                    font: span.font_id.clone(),
+                    font: PdfFontHandle::External(span.font_id.clone()),
                 },
-                Op::WriteText {
+                Op::ShowText {
                     items: vec![TextItem::Text(span.text.clone())],
-                    font: span.font_id.clone(),
                 },
             ]
         }));
@@ -299,13 +294,12 @@ impl PageBuilder {
                 Op::SetFillColor {
                     col: span.color.clone(),
                 },
-                Op::SetFontSize {
+                Op::SetFont {
                     size: span.size,
-                    font: span.font_id.clone(),
+                    font: PdfFontHandle::External(span.font_id.clone()),
                 },
-                Op::WriteText {
+                Op::ShowText {
                     items: vec![TextItem::Text(span.text.clone())],
-                    font: span.font_id.clone(),
                 },
             ]
         }));

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::defaults::DEFAULT_EXCLUDES;
-use crate::error::Error;
 
 /// Filters file paths based on glob include/exclude patterns.
 ///
@@ -15,18 +14,43 @@ pub struct FileFilter {
 }
 
 impl FileFilter {
-    pub fn new(include_patterns: &[String], exclude_patterns: &[String]) -> Result<Self, Error> {
+    /// Creates a new `FileFilter` from glob include and exclude patterns.
+    ///
+    /// An empty `include_patterns` slice allows all files (subject to excludes).
+    /// Default excludes (lock files, build artifacts, binaries, etc.) are always applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any glob pattern is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gitprint::filter::FileFilter;
+    /// use std::path::Path;
+    ///
+    /// // Include only Rust files, exclude test helpers
+    /// let filter = FileFilter::new(
+    ///     &["*.rs".to_string()],
+    ///     &["test_*.rs".to_string()],
+    /// ).unwrap();
+    ///
+    /// assert!(filter.should_include(Path::new("main.rs")));
+    /// assert!(!filter.should_include(Path::new("test_helper.rs")));
+    /// assert!(!filter.should_include(Path::new("README.md")));
+    /// ```
+    pub fn new(include_patterns: &[String], exclude_patterns: &[String]) -> anyhow::Result<Self> {
         let include_set = if include_patterns.is_empty() {
             None
         } else {
             let set = include_patterns
                 .iter()
                 .try_fold(GlobSetBuilder::new(), |mut b, p| {
-                    b.add(Glob::new(p).map_err(|e| Error::Filter(e.to_string()))?);
-                    Ok::<_, Error>(b)
+                    b.add(Glob::new(p).map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}"))?);
+                    Ok::<_, anyhow::Error>(b)
                 })?
                 .build()
-                .map_err(|e| Error::Filter(e.to_string()))?;
+                .map_err(|e| anyhow::anyhow!("failed to build glob set: {e}"))?;
             Some(set)
         };
 
@@ -36,9 +60,8 @@ impl FileFilter {
             .chain(
                 exclude_patterns
                     .iter()
-                    .map(|p| Glob::new(p))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| Error::Filter(e.to_string()))?
+                    .map(|p| Glob::new(p).map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}")))
+                    .collect::<anyhow::Result<Vec<_>>>()?
                     .into_iter(),
             )
             .fold(GlobSetBuilder::new(), |mut b, g| {
@@ -46,7 +69,7 @@ impl FileFilter {
                 b
             })
             .build()
-            .map_err(|e| Error::Filter(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!("failed to build glob set: {e}"))?;
 
         Ok(Self {
             include_set,
@@ -54,6 +77,21 @@ impl FileFilter {
         })
     }
 
+    /// Returns `true` if `path` should be included given the configured patterns.
+    ///
+    /// Exclude patterns always win over include patterns.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gitprint::filter::FileFilter;
+    /// use std::path::Path;
+    ///
+    /// let filter = FileFilter::new(&["*.rs".to_string()], &[]).unwrap();
+    /// assert!(filter.should_include(Path::new("src/lib.rs")));
+    /// assert!(!filter.should_include(Path::new("Cargo.toml")));
+    /// assert!(!filter.should_include(Path::new("Cargo.lock"))); // default exclude
+    /// ```
     pub fn should_include(&self, path: &Path) -> bool {
         if self.exclude_set.is_match(path) {
             return false;
@@ -63,18 +101,59 @@ impl FileFilter {
             .is_none_or(|set| set.is_match(path))
     }
 
+    /// Filters a list of paths, retaining only those that pass `should_include`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gitprint::filter::FileFilter;
+    /// use std::path::PathBuf;
+    ///
+    /// let filter = FileFilter::new(&["*.rs".to_string()], &[]).unwrap();
+    /// let paths = vec![
+    ///     PathBuf::from("main.rs"),
+    ///     PathBuf::from("README.md"),
+    ///     PathBuf::from("lib.rs"),
+    /// ];
+    /// let kept: Vec<_> = filter.filter_paths(paths).collect();
+    /// assert_eq!(kept, vec![PathBuf::from("main.rs"), PathBuf::from("lib.rs")]);
+    /// ```
     pub fn filter_paths(&self, paths: Vec<PathBuf>) -> impl Iterator<Item = PathBuf> + '_ {
         paths.into_iter().filter(|p| self.should_include(p))
     }
 }
 
 /// Returns `true` if the content appears to be a binary file.
+///
+/// Detection is based on the presence of non-text byte sequences (e.g. null bytes).
+///
+/// # Examples
+///
+/// ```
+/// use gitprint::filter::is_binary;
+///
+/// assert!(is_binary(b"hello\x00world")); // null byte → binary
+/// assert!(!is_binary(b"fn main() {}")); // valid UTF-8 → not binary
+/// assert!(!is_binary(b""));
+/// ```
 pub fn is_binary(content: &[u8]) -> bool {
     content_inspector::inspect(content).is_binary()
 }
 
-/// Returns `true` if the content appears to be minified
-/// (any of the first 5 lines exceeds 500 characters).
+/// Returns `true` if the content appears to be minified.
+///
+/// A file is considered minified when any of its first 5 lines exceeds 500 characters,
+/// which is characteristic of bundled or minified JavaScript/CSS.
+///
+/// # Examples
+///
+/// ```
+/// use gitprint::filter::is_minified;
+///
+/// assert!(is_minified(&"x".repeat(501)));   // single very long line
+/// assert!(!is_minified("fn main() {\n    println!(\"hello\");\n}\n"));
+/// assert!(!is_minified(""));
+/// ```
 pub fn is_minified(content: &str) -> bool {
     content.lines().take(5).any(|line| line.len() > 500)
 }

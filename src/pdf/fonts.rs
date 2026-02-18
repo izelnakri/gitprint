@@ -1,20 +1,18 @@
-use printpdf::{ParsedFont, PdfDocument, PdfWarnMsg};
+use printpdf::{ParsedFont, PdfDocument};
 
 use super::layout::FontSet;
-use crate::error::Error;
 
 const REGULAR: &[u8] = include_bytes!("../../fonts/JetBrainsMono-Regular.ttf");
 const BOLD: &[u8] = include_bytes!("../../fonts/JetBrainsMono-Bold.ttf");
 const ITALIC: &[u8] = include_bytes!("../../fonts/JetBrainsMono-Italic.ttf");
 const BOLD_ITALIC: &[u8] = include_bytes!("../../fonts/JetBrainsMono-BoldItalic.ttf");
 
-fn parse_font(bytes: &[u8], label: &str) -> Result<ParsedFont, Error> {
-    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
-    ParsedFont::from_bytes(bytes, 0, &mut warnings)
-        .ok_or_else(|| Error::Font(format!("{label}: failed to parse font")))
+fn parse_font(bytes: &[u8], label: &str) -> anyhow::Result<ParsedFont> {
+    ParsedFont::from_bytes(bytes, 0, &mut Vec::new())
+        .ok_or_else(|| anyhow::anyhow!("font loading failed: {label}: failed to parse font"))
 }
 
-pub fn load_fonts(doc: &mut PdfDocument) -> Result<FontSet, Error> {
+pub fn load_fonts(doc: &mut PdfDocument) -> anyhow::Result<FontSet> {
     let regular = parse_font(REGULAR, "regular")?;
     let bold = parse_font(BOLD, "bold")?;
     let italic = parse_font(ITALIC, "italic")?;

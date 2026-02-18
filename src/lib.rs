@@ -7,7 +7,6 @@
 
 pub mod cli;
 pub mod defaults;
-pub mod error;
 pub mod filter;
 pub mod git;
 pub mod highlight;
@@ -17,9 +16,9 @@ pub mod types;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::bail;
 use rayon::prelude::*;
 
-use crate::error::Error;
 use crate::types::{Config, HighlightedLine};
 
 /// A processed file ready for PDF rendering.
@@ -50,32 +49,72 @@ fn format_elapsed(elapsed: std::time::Duration) -> String {
     }
 }
 
-/// Run the full pipeline: git → filter → highlight → PDF.
+/// Runs the full gitprint pipeline and writes a PDF to `config.output_path`.
+///
+/// Accepts a single file, a git repository (optionally scoped to a subdirectory),
+/// or a plain directory. The output always goes to `config.output_path`.
+///
+/// # Errors
+///
+/// Returns an error if the path does not exist, git operations fail, the theme is
+/// invalid, or writing the PDF fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// use gitprint::types::{Config, PaperSize};
+/// use std::path::PathBuf;
+///
+/// let config = Config {
+///     repo_path: PathBuf::from("."),
+///     output_path: PathBuf::from("out.pdf"),
+///     // ... other fields
+/// #   include_patterns: vec![],
+/// #   exclude_patterns: vec![],
+/// #   theme: "InspiredGitHub".to_string(),
+/// #   font_size: 8.0,
+/// #   no_line_numbers: false,
+/// #   toc: true,
+/// #   file_tree: true,
+/// #   branch: None,
+/// #   commit: None,
+/// #   paper_size: PaperSize::A4,
+/// #   landscape: false,
+/// };
+/// gitprint::run(&config).await.unwrap();
+/// ```
 ///
 /// **Concurrency model**:
-/// - Initial git operations (metadata, file list, date map, highlighter init) run in parallel.
-/// - File reads use a tokio `JoinSet` (I/O-bound).
+/// - Single-file mode: highlighter init (CPU, `spawn_blocking`) runs concurrently with
+///   file content read and last-modified date fetch (both I/O).
+/// - Multi-file mode: git metadata, tracked-file list, date map, and highlighter init
+///   all run concurrently via `tokio::join!`; highlighter uses `spawn_blocking` to keep
+///   tokio worker threads free for I/O.
+/// - File reads use a tokio `JoinSet` (I/O-bound parallelism).
 /// - Syntax highlighting uses rayon `par_iter` via `spawn_blocking` (CPU-bound).
-/// - Dummy TOC/tree renders for page counting run in parallel via `rayon::join`.
-/// - Actual TOC and tree renders run in parallel via `rayon::join`.
-pub async fn run(config: &Config) -> Result<(), Error> {
+/// - Cover render, dummy TOC count, and dummy tree count run in parallel via nested
+///   `rayon::join` — all three are CPU-bound and mutually independent.
+/// - Final TOC and tree renders also run in parallel via `rayon::join`.
+pub async fn run(config: &Config) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
 
     let info = git::verify_repo(&config.repo_path).await?;
 
     // Single-file mode: no cover page, TOC, or file tree — just render the file.
     if let Some(ref single_file) = info.single_file {
-        let highlighter = highlight::Highlighter::new(&config.theme)?;
-        let (content_res, last_modified) = tokio::join!(
+        // Highlighter init (CPU, spawn_blocking) overlaps with two I/O calls.
+        let theme = config.theme.clone();
+        let (highlighter_res, content_res, last_modified) = tokio::join!(
+            tokio::task::spawn_blocking(move || highlight::Highlighter::new(&theme)),
             git::read_file_content(&info.root, single_file, config),
             git::file_last_modified(&info.root, single_file, config, info.is_git),
         );
+        let highlighter =
+            highlighter_res.map_err(|e| anyhow::anyhow!("highlighter panicked: {e}"))??;
         let content = content_res?;
+
         if filter::is_binary(content.as_bytes()) || filter::is_minified(&content) {
-            return Err(Error::Git(format!(
-                "{}: binary or minified file",
-                single_file.display()
-            )));
+            bail!("{}: binary or minified file", single_file.display());
         }
         let line_count = content.lines().count();
         let size_str = format_size(content.len() as u64);
@@ -119,16 +158,20 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     let scope = info.scope;
 
     // Parallel: git metadata + tracked file list + date map + highlighter init.
-    // All four are independent of each other once we have the repo path.
+    // Highlighter::new is CPU-bound (syntect deserialization); spawn_blocking keeps
+    // tokio worker threads free for the concurrent I/O-bound git calls.
+    let theme = config.theme.clone();
     let (metadata_res, all_paths_res, date_map_res, highlighter_res) = tokio::join!(
         git::get_metadata(&repo_path, config, is_git, scope.as_deref()),
         git::list_tracked_files(&repo_path, config, is_git, scope.as_deref()),
         git::file_last_modified_dates(&repo_path, config, is_git, scope.as_deref()),
-        async { highlight::Highlighter::new(&config.theme) },
+        tokio::task::spawn_blocking(move || highlight::Highlighter::new(&theme)),
     );
 
     let mut metadata = metadata_res?;
-    let highlighter = Arc::new(highlighter_res?);
+    let highlighter = Arc::new(
+        highlighter_res.map_err(|e| anyhow::anyhow!("highlighter panicked: {e}"))??,
+    );
     let date_map = Arc::new(date_map_res?);
 
     let file_filter = filter::FileFilter::new(&config.include_patterns, &config.exclude_patterns)?;
@@ -172,7 +215,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             .collect()
     })
     .await
-    .map_err(|_| Error::Git("highlight task panicked".to_string()))?;
+    .map_err(|e| anyhow::anyhow!("highlight task panicked: {e}"))?;
 
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
@@ -183,14 +226,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     let mut doc = printpdf::PdfDocument::new("gitprint");
     let fonts = pdf::fonts::load_fonts(&mut doc)?;
 
-    // Cover page (always page 1).
-    let cover_pages = {
-        let mut b = pdf::create_builder(config, fonts.clone());
-        pdf::cover::render(&mut b, &metadata);
-        b.finish()
-    };
-    let cover_count = cover_pages.len();
-
+    // Collect paths and build dummy TOC entries before the parallel render phase.
     let tree_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
     // Dummy TOC entries (start_page=0) used purely to count how many pages the TOC occupies.
@@ -206,27 +242,39 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         })
         .collect();
 
-    // Count TOC pages and tree pages in parallel — both are independent CPU-bound renders.
-    let (toc_count, tree_count) = rayon::join(
+    // Cover render + dummy TOC count + dummy tree count all run in parallel.
+    // None of the three depends on the others' output; cover needs only metadata
+    // and fonts, while the two counts need only their respective data and fonts.
+    let (cover_pages, (toc_count, tree_count)) = rayon::join(
         || {
-            if config.toc {
-                let mut b = pdf::create_builder(config, fonts.clone());
-                pdf::toc::render(&mut b, &dummy_toc_entries);
-                b.finish().len()
-            } else {
-                0
-            }
+            let mut b = pdf::create_builder(config, fonts.clone());
+            pdf::cover::render(&mut b, &metadata);
+            b.finish()
         },
         || {
-            if config.file_tree {
-                let mut b = pdf::create_builder(config, fonts.clone());
-                pdf::tree::render(&mut b, &tree_paths);
-                b.finish().len()
-            } else {
-                0
-            }
+            rayon::join(
+                || {
+                    if config.toc {
+                        let mut b = pdf::create_builder(config, fonts.clone());
+                        pdf::toc::render(&mut b, &dummy_toc_entries);
+                        b.finish().len()
+                    } else {
+                        0
+                    }
+                },
+                || {
+                    if config.file_tree {
+                        let mut b = pdf::create_builder(config, fonts.clone());
+                        pdf::tree::render(&mut b, &tree_paths);
+                        b.finish().len()
+                    } else {
+                        0
+                    }
+                },
+            )
         },
     );
+    let cover_count = cover_pages.len();
 
     // Render file content sequentially, tracking each file's starting page.
     let file_base_page = cover_count + toc_count + tree_count + 1;

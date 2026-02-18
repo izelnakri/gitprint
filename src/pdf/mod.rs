@@ -9,7 +9,6 @@ use std::path::Path;
 
 use printpdf::{Mm, PdfDocument, PdfSaveOptions};
 
-use crate::error::Error;
 use crate::types::{Config, PaperSize};
 use layout::{FontSet, PageBuilder};
 
@@ -36,10 +35,10 @@ pub fn create_builder_at_page(
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
 }
 
-pub fn save_pdf(doc: &PdfDocument, path: &Path) -> Result<(), Error> {
+pub fn save_pdf(doc: &PdfDocument, path: &Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
-    std::fs::write(path, bytes).map_err(Error::Io)
+    std::fs::write(path, bytes).map_err(Into::into)
 }
 
 #[cfg(test)]

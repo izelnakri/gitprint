@@ -17,7 +17,8 @@
       "Bash(gh run list:*)",
       "Bash(echo:*)",
       "Bash(cargo doc:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(grep:*)"
     ]
   }
 }

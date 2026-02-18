@@ -6,20 +6,19 @@ description = "Convert git repositories into beautifully formatted, printer-frie
 license = "MIT"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 content_inspector = "0.2"
 globset = "0.4"
-printpdf = "0.8"
+printpdf = "0.9"
 rayon = "1"
-thiserror = "2.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process"] }
-syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process"] }
 
 [[bench]]
 name = "pipeline"
