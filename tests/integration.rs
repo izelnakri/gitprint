@@ -125,7 +125,9 @@ async fn git_verify_repo_plain_directory() -> Result<(), Box<dyn std::error::Err
 #[tokio::test]
 async fn git_verify_repo_plain_file() -> Result<(), Box<dyn std::error::Error>> {
     let dir = TempDir::new()?;
-    tokio::fs::write(dir.path().join("hello.rs"), "fn main() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("hello.rs"), "fn main() {}")
+        .await
+        .unwrap();
     let info = gitprint::git::verify_repo(&dir.path().join("hello.rs")).await?;
     assert!(!info.is_git);
     assert_eq!(info.single_file, Some(PathBuf::from("hello.rs")));
@@ -202,7 +204,9 @@ async fn git_list_files_plain_directory() -> Result<(), Box<dyn std::error::Erro
         tokio::fs::create_dir(dir.path().join("sub")),
     )
     .unwrap();
-    tokio::fs::write(dir.path().join("sub/world.rs"), "pub fn world() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("sub/world.rs"), "pub fn world() {}")
+        .await
+        .unwrap();
     let config = test_config(dir.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
     let files = gitprint::git::list_tracked_files(dir.path(), &config, false, None).await?;
 

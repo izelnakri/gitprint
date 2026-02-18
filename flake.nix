@@ -17,11 +17,13 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" "clippy" ];
+        # Pin to the exact version declared in rust-toolchain.toml — same as CI.
+        # Dev shell adds rust-src + rust-analyzer on top for IDE support.
+        rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+          extensions = [ "rust-src" "rust-analyzer" ];
         };
 
-        craneLib = crane.mkLib pkgs;
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
         # Source filtering: include Rust/Cargo files + embedded fonts
         unfilteredRoot = ./.;

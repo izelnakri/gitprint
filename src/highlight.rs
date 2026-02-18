@@ -36,13 +36,11 @@ impl Highlighter {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
 
-        let theme = theme_set
-            .themes
-            .get(theme_name)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!(
+        let theme = theme_set.themes.get(theme_name).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
                 "theme not found: {theme_name} (use --list-themes to see available themes)"
-            ))?;
+            )
+        })?;
 
         Ok(Self { syntax_set, theme })
     }
@@ -142,7 +140,13 @@ mod tests {
     fn new_with_invalid_theme() {
         let result = Highlighter::new("NonExistentTheme");
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("NonExistentTheme"));
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("NonExistentTheme")
+        );
     }
 
     #[test]

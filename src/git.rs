@@ -145,7 +145,10 @@ pub async fn verify_repo(path: &Path) -> anyhow::Result<RepoInfo> {
         });
     }
 
-    bail!("{}: not a git repository, directory, or file", path.display())
+    bail!(
+        "{}: not a git repository, directory, or file",
+        path.display()
+    )
 }
 
 /// Fetches repository metadata: branch, last commit hash/date/message, and name.

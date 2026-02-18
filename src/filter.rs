@@ -46,7 +46,10 @@ impl FileFilter {
             let set = include_patterns
                 .iter()
                 .try_fold(GlobSetBuilder::new(), |mut b, p| {
-                    b.add(Glob::new(p).map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}"))?);
+                    b.add(
+                        Glob::new(p)
+                            .map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}"))?,
+                    );
                     Ok::<_, anyhow::Error>(b)
                 })?
                 .build()
@@ -60,7 +63,9 @@ impl FileFilter {
             .chain(
                 exclude_patterns
                     .iter()
-                    .map(|p| Glob::new(p).map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}")))
+                    .map(|p| {
+                        Glob::new(p).map_err(|e| anyhow::anyhow!("invalid glob pattern '{p}': {e}"))
+                    })
                     .collect::<anyhow::Result<Vec<_>>>()?
                     .into_iter(),
             )

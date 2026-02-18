@@ -169,9 +169,8 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     );
 
     let mut metadata = metadata_res?;
-    let highlighter = Arc::new(
-        highlighter_res.map_err(|e| anyhow::anyhow!("highlighter panicked: {e}"))??,
-    );
+    let highlighter =
+        Arc::new(highlighter_res.map_err(|e| anyhow::anyhow!("highlighter panicked: {e}"))??);
     let date_map = Arc::new(date_map_res?);
 
     let file_filter = filter::FileFilter::new(&config.include_patterns, &config.exclude_patterns)?;
