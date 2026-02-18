@@ -10,20 +10,30 @@ pub fn render_file(
     total_lines: usize,
     show_line_numbers: bool,
     font_size: u8,
+    file_info: &str,
 ) {
     let bold = builder.font(true, false).clone();
+    let regular = builder.font(false, false).clone();
     let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
     let size = Pt(font_size as f32);
     let gray = Color::Rgb(Rgb::new(0.59, 0.59, 0.59, None));
     let line_number_width = total_lines.max(1).ilog10() as usize + 1;
 
-    // File header
-    builder.write_line(&[Span {
-        text: file_path.to_string(),
-        font_id: bold,
-        size: Pt(font_size as f32 + 2.0),
-        color: black,
-    }]);
+    // File header: path left-aligned, metadata right-aligned
+    builder.write_line_justified(
+        &[Span {
+            text: file_path.to_string(),
+            font_id: bold,
+            size: Pt(font_size as f32 + 2.0),
+            color: black,
+        }],
+        &[Span {
+            text: file_info.to_string(),
+            font_id: regular,
+            size: Pt(7.0),
+            color: gray.clone(),
+        }],
+    );
     builder.vertical_space(4.0);
 
     lines.for_each(|line| {
@@ -101,6 +111,7 @@ mod tests {
             2,
             true,
             8,
+            "2 lines \u{00B7} 24 B \u{00B7} 2025-01-15",
         );
     }
 
@@ -110,7 +121,15 @@ mod tests {
         let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
         let mut builder = pdf::create_builder(&config, fonts);
-        super::render_file(&mut builder, "empty.rs", std::iter::empty(), 0, true, 8);
+        super::render_file(
+            &mut builder,
+            "empty.rs",
+            std::iter::empty(),
+            0,
+            true,
+            8,
+            "0 lines \u{00B7} 0 B",
+        );
     }
 
     #[test]
@@ -126,6 +145,7 @@ mod tests {
             2,
             false,
             8,
+            "2 lines \u{00B7} 24 B \u{00B7} 2025-01-15",
         );
     }
 
@@ -146,6 +166,14 @@ mod tests {
                 }],
             })
             .collect();
-        super::render_file(&mut builder, "big.rs", lines.into_iter(), 100, true, 8);
+        super::render_file(
+            &mut builder,
+            "big.rs",
+            lines.into_iter(),
+            100,
+            true,
+            8,
+            "100 lines \u{00B7} 1.2 KB \u{00B7} 2025-01-15",
+        );
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use tokio::process::Command;
@@ -79,6 +80,38 @@ pub async fn list_tracked_files(repo_path: &Path, config: &Config) -> Result<Vec
         .filter(|l| !l.is_empty())
         .map(PathBuf::from)
         .collect())
+}
+
+/// Returns a map of file path → last modified date (YYYY-MM-DD) in a single git call.
+pub async fn file_last_modified_dates(
+    repo_path: &Path,
+    config: &Config,
+) -> Result<HashMap<PathBuf, String>, Error> {
+    let rev = match (&config.commit, &config.branch) {
+        (Some(c), _) => c.clone(),
+        (_, Some(b)) => b.clone(),
+        _ => "HEAD".to_string(),
+    };
+
+    let output = run_git(
+        repo_path,
+        &["log", "--format=COMMIT:%ci", "--name-only", &rev],
+    )
+    .await?;
+
+    let mut map = HashMap::new();
+    let mut current_date = String::new();
+
+    output.lines().for_each(|line| {
+        if let Some(date_str) = line.strip_prefix("COMMIT:") {
+            current_date = date_str.chars().take(10).collect();
+        } else if !line.is_empty() && !current_date.is_empty() {
+            map.entry(PathBuf::from(line))
+                .or_insert_with(|| current_date.clone());
+        }
+    });
+
+    Ok(map)
 }
 
 pub async fn read_file_content(

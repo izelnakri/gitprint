@@ -75,7 +75,6 @@ impl PageBuilder {
 
     fn start_new_page(&mut self) {
         if !self.current_ops.is_empty() {
-            self.current_ops.push(Op::EndTextSection);
             self.pages.push(PdfPage::new(
                 self.page_width,
                 self.page_height,
@@ -92,7 +91,6 @@ impl PageBuilder {
         let header_font = self.fonts.regular.clone();
 
         self.current_ops.extend([
-            // Header
             Op::StartTextSection,
             Op::SetTextCursor {
                 pos: Point {
@@ -112,11 +110,6 @@ impl PageBuilder {
                 font: header_font,
             },
             Op::EndTextSection,
-            // Content section
-            Op::StartTextSection,
-            Op::SetLineHeight {
-                lh: Pt(self.line_height),
-            },
         ]);
     }
 
@@ -133,12 +126,15 @@ impl PageBuilder {
     pub fn write_line(&mut self, spans: &[Span]) {
         self.ensure_space(self.line_height);
 
-        self.current_ops.push(Op::SetTextCursor {
-            pos: Point {
-                x: self.left_x(),
-                y: self.pdf_y(),
+        self.current_ops.extend([
+            Op::StartTextSection,
+            Op::SetTextCursor {
+                pos: Point {
+                    x: self.left_x(),
+                    y: self.pdf_y(),
+                },
             },
-        });
+        ]);
 
         self.current_ops.extend(spans.iter().flat_map(|span| {
             [
@@ -156,6 +152,7 @@ impl PageBuilder {
             ]
         }));
 
+        self.current_ops.push(Op::EndTextSection);
         self.y += self.line_height;
     }
 
@@ -170,6 +167,7 @@ impl PageBuilder {
         let x = (self.page_width.into_pt().0 - text_width) / 2.0;
 
         self.current_ops.extend([
+            Op::StartTextSection,
             Op::SetTextCursor {
                 pos: Point {
                     x: Pt(x.max(0.0)),
@@ -185,9 +183,77 @@ impl PageBuilder {
                 items: vec![TextItem::Text(text.to_string())],
                 font: font_id.clone(),
             },
+            Op::EndTextSection,
         ]);
 
         self.y += size.0 + 4.0;
+    }
+
+    pub fn write_line_justified(&mut self, left: &[Span], right: &[Span]) {
+        self.ensure_space(self.line_height);
+        let y = self.pdf_y();
+
+        // Left-aligned spans
+        self.current_ops.extend([
+            Op::StartTextSection,
+            Op::SetTextCursor {
+                pos: Point {
+                    x: self.left_x(),
+                    y,
+                },
+            },
+        ]);
+        self.current_ops.extend(left.iter().flat_map(|span| {
+            [
+                Op::SetFillColor {
+                    col: span.color.clone(),
+                },
+                Op::SetFontSize {
+                    size: span.size,
+                    font: span.font_id.clone(),
+                },
+                Op::WriteText {
+                    items: vec![TextItem::Text(span.text.clone())],
+                    font: span.font_id.clone(),
+                },
+            ]
+        }));
+        self.current_ops.push(Op::EndTextSection);
+
+        // Right-aligned spans
+        let right_width: f32 = right
+            .iter()
+            .map(|s| s.text.len() as f32 * s.size.0 * 0.6)
+            .sum();
+        let right_x = self.page_width.into_pt().0 - self.margin.into_pt().0 - right_width;
+
+        self.current_ops.extend([
+            Op::StartTextSection,
+            Op::SetTextCursor {
+                pos: Point {
+                    x: Pt(right_x.max(0.0)),
+                    y,
+                },
+            },
+        ]);
+        self.current_ops.extend(right.iter().flat_map(|span| {
+            [
+                Op::SetFillColor {
+                    col: span.color.clone(),
+                },
+                Op::SetFontSize {
+                    size: span.size,
+                    font: span.font_id.clone(),
+                },
+                Op::WriteText {
+                    items: vec![TextItem::Text(span.text.clone())],
+                    font: span.font_id.clone(),
+                },
+            ]
+        }));
+        self.current_ops.push(Op::EndTextSection);
+
+        self.y += self.line_height;
     }
 
     pub fn font(&self, bold: bool, italic: bool) -> &FontId {
@@ -201,7 +267,6 @@ impl PageBuilder {
 
     pub fn finish(mut self) -> Vec<PdfPage> {
         if !self.current_ops.is_empty() {
-            self.current_ops.push(Op::EndTextSection);
             self.pages.push(PdfPage::new(
                 self.page_width,
                 self.page_height,

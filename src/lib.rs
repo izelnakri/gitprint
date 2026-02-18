@@ -25,6 +25,18 @@ struct ProcessedFile {
     path: PathBuf,
     lines: Vec<HighlightedLine>,
     line_count: usize,
+    file_size: u64,
+    last_modified: String,
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 /// Run the full pipeline: git → filter → highlight → PDF.
@@ -41,6 +53,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     paths.sort();
 
     let highlighter = Arc::new(highlight::Highlighter::new(&config.theme)?);
+    let date_map = Arc::new(git::file_last_modified_dates(&repo_path, config).await?);
 
     // Parallel: read + filter + highlight all files concurrently
     let mut set = tokio::task::JoinSet::new();
@@ -48,15 +61,20 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         let repo = repo_path.clone();
         let cfg = config.clone();
         let hl = Arc::clone(&highlighter);
+        let dates = Arc::clone(&date_map);
 
         set.spawn(async move {
             let content = read_text_file(&repo, &path, &cfg).await?;
+            let file_size = content.len() as u64;
             let line_count = content.lines().count();
+            let last_modified = dates.get(&path).cloned().unwrap_or_default();
             let lines: Vec<HighlightedLine> = hl.highlight_lines(&content, &path).collect();
             Some(ProcessedFile {
                 path,
                 lines,
                 line_count,
+                file_size,
+                last_modified,
             })
         });
     });
@@ -88,6 +106,11 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     }
 
     files.into_iter().for_each(|file| {
+        let size_str = format_size(file.file_size);
+        let info = format!(
+            "{} lines \u{00B7} {} \u{00B7} {}",
+            file.line_count, size_str, file.last_modified
+        );
         pdf::code::render_file(
             &mut builder,
             &file.path.display().to_string(),
@@ -95,6 +118,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             file.line_count,
             !config.no_line_numbers,
             config.font_size as u8,
+            &info,
         );
     });
 
