@@ -27,6 +27,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process
 name = "pipeline"
 harness = false
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+
 [profile.release]
 opt-level = 3
 lto = "fat"

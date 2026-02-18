@@ -43,13 +43,11 @@
         # Build dependencies only — cached separately from source changes
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
+        # Build-only package: no tests so `nix run` and `nix build` are fast.
+        # Tests live in checks.tests below and still run on `nix flake check`.
         gitprint = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
-          nativeCheckInputs = [ pkgs.git ];
-
-          preCheck = ''
-            export HOME=$(mktemp -d)
-          '';
+          doCheck = false;
 
           postInstall = ''
             wrapProgram $out/bin/gitprint \
@@ -89,6 +87,14 @@
 
         checks = {
           inherit gitprint;
+
+          tests = craneLib.cargoTest (commonArgs // {
+            inherit cargoArtifacts;
+            nativeCheckInputs = [ pkgs.git ];
+            preCheck = ''
+              export HOME=$(mktemp -d)
+            '';
+          });
 
           clippy = craneLib.cargoClippy (commonArgs // {
             inherit cargoArtifacts;
