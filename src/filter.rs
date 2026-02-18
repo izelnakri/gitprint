@@ -142,7 +142,7 @@ impl FileFilter {
 /// assert!(!is_binary(b""));
 /// ```
 pub fn is_binary(content: &[u8]) -> bool {
-    content_inspector::inspect(content).is_binary()
+    content.iter().take(8000).any(|&b| b == 0)
 }
 
 /// Returns `true` if the content appears to be minified.

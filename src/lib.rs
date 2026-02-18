@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::bail;
-use rayon::prelude::*;
 
 use crate::types::{Config, HighlightedLine};
 
@@ -91,10 +90,9 @@ fn format_elapsed(elapsed: std::time::Duration) -> String {
 ///   all run concurrently via `tokio::join!`; highlighter uses `spawn_blocking` to keep
 ///   tokio worker threads free for I/O.
 /// - File reads use a tokio `JoinSet` (I/O-bound parallelism).
-/// - Syntax highlighting uses rayon `par_iter` via `spawn_blocking` (CPU-bound).
-/// - Cover render, dummy TOC count, and dummy tree count run in parallel via nested
-///   `rayon::join` — all three are CPU-bound and mutually independent.
-/// - Final TOC and tree renders also run in parallel via `rayon::join`.
+/// - Syntax highlighting uses a tokio `JoinSet` of `spawn_blocking` tasks — one per file
+///   — so all files are highlighted concurrently across the blocking thread pool (CPU-bound).
+/// - Cover, TOC, and tree PDF renders are sequential (each < 5 ms; not worth the overhead).
 pub async fn run(config: &Config) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
 
@@ -194,13 +192,14 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     let raw_files: Vec<(PathBuf, String, String)> =
         read_set.join_all().await.into_iter().flatten().collect();
 
-    // Phase 2 — CPU: highlight all files in parallel with rayon via spawn_blocking,
-    // keeping tokio worker threads free for I/O during this CPU-heavy phase.
-    let hl = Arc::clone(&highlighter);
-    let mut files: Vec<ProcessedFile> = tokio::task::spawn_blocking(move || {
-        raw_files
-            .into_par_iter()
-            .map(|(path, content, last_modified)| {
+    // Phase 2 — CPU: highlight each file in a dedicated blocking task so all files
+    // are processed concurrently across tokio's blocking thread pool.
+    let mut highlight_set: tokio::task::JoinSet<ProcessedFile> = tokio::task::JoinSet::new();
+    raw_files
+        .into_iter()
+        .for_each(|(path, content, last_modified)| {
+            let hl = Arc::clone(&highlighter);
+            highlight_set.spawn_blocking(move || {
                 let line_count = content.lines().count();
                 let size_str = format_size(content.len() as u64);
                 let lines: Vec<HighlightedLine> = hl.highlight_lines(&content, &path).collect();
@@ -211,11 +210,9 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
                     size_str,
                     last_modified,
                 }
-            })
-            .collect()
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("highlight task panicked: {e}"))?;
+            });
+        });
+    let mut files: Vec<ProcessedFile> = highlight_set.join_all().await;
 
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
@@ -242,38 +239,25 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
         })
         .collect();
 
-    // Cover render + dummy TOC count + dummy tree count all run in parallel.
-    // None of the three depends on the others' output; cover needs only metadata
-    // and fonts, while the two counts need only their respective data and fonts.
-    let (cover_pages, (toc_count, tree_count)) = rayon::join(
-        || {
-            let mut b = pdf::create_builder(config, fonts.clone());
-            pdf::cover::render(&mut b, &metadata);
-            b.finish()
-        },
-        || {
-            rayon::join(
-                || {
-                    if config.toc {
-                        let mut b = pdf::create_builder(config, fonts.clone());
-                        pdf::toc::render(&mut b, &dummy_toc_entries);
-                        b.finish().len()
-                    } else {
-                        0
-                    }
-                },
-                || {
-                    if config.file_tree {
-                        let mut b = pdf::create_builder(config, fonts.clone());
-                        pdf::tree::render(&mut b, &tree_paths);
-                        b.finish().len()
-                    } else {
-                        0
-                    }
-                },
-            )
-        },
-    );
+    let cover_pages = {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::cover::render(&mut b, &metadata);
+        b.finish()
+    };
+    let toc_count = if config.toc {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::toc::render(&mut b, &dummy_toc_entries);
+        b.finish().len()
+    } else {
+        0
+    };
+    let tree_count = if config.file_tree {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::tree::render(&mut b, &tree_paths);
+        b.finish().len()
+    } else {
+        0
+    };
     let cover_count = cover_pages.len();
 
     // Render file content sequentially, tracking each file's starting page.
@@ -306,28 +290,20 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     });
     let content_pages = content_builder.finish();
 
-    // Render actual TOC (with real page numbers) and tree in parallel.
-    let (toc_pages, tree_pages) = rayon::join(
-        || {
-            if config.toc {
-                let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + 1);
-                pdf::toc::render(&mut b, &toc_entries);
-                b.finish()
-            } else {
-                vec![]
-            }
-        },
-        || {
-            if config.file_tree {
-                let mut b =
-                    pdf::create_builder_at_page(config, fonts.clone(), cover_count + toc_count + 1);
-                pdf::tree::render(&mut b, &tree_paths);
-                b.finish()
-            } else {
-                vec![]
-            }
-        },
-    );
+    let toc_pages = if config.toc {
+        let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + 1);
+        pdf::toc::render(&mut b, &toc_entries);
+        b.finish()
+    } else {
+        vec![]
+    };
+    let tree_pages = if config.file_tree {
+        let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + toc_count + 1);
+        pdf::tree::render(&mut b, &tree_paths);
+        b.finish()
+    } else {
+        vec![]
+    };
 
     // Assemble final document: cover → TOC → tree → file content.
     let all_pages: Vec<_> = cover_pages

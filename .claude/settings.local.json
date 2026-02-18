@@ -18,7 +18,8 @@
       "Bash(echo:*)",
       "Bash(cargo doc:*)",
       "Bash(wc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(cargo tree:*)"
     ]
   }
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.1] - 2026-02-18
+### Features
+- Slim down dependency tree further
+
 ## [0.2.0] - 2026-02-18
 ### Bug Fixes
 - Ensure musl target stdlib is installed on cold cache; add README badges
