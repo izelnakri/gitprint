@@ -902,6 +902,7 @@ dependencies = [
  "criterion",
  "globset",
  "printpdf",
+ "rayon",
  "syntect",
  "tempfile",
  "thiserror",

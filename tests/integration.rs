@@ -75,14 +75,50 @@ fn test_config(repo_path: PathBuf, output_path: PathBuf) -> Config {
 #[tokio::test]
 async fn git_verify_repo_valid() -> Result<(), Box<dyn std::error::Error>> {
     let repo = create_test_repo();
-    gitprint::git::verify_repo(repo.path()).await?;
+    let info = gitprint::git::verify_repo(repo.path()).await?;
+    assert!(info.is_git);
+    assert!(info.scope.is_none());
+    assert!(info.single_file.is_none());
     Ok(())
 }
 
 #[tokio::test]
-async fn git_verify_repo_not_a_repo() {
-    let dir = TempDir::new().unwrap();
-    assert!(gitprint::git::verify_repo(dir.path()).await.is_err());
+async fn git_verify_repo_subdir() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = create_test_repo();
+    let info = gitprint::git::verify_repo(&repo.path().join("src")).await?;
+    assert!(info.is_git);
+    assert_eq!(info.scope, Some(PathBuf::from("src")));
+    assert!(info.single_file.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn git_verify_repo_single_file_in_git() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = create_test_repo();
+    let info = gitprint::git::verify_repo(&repo.path().join("main.rs")).await?;
+    assert!(info.is_git);
+    assert_eq!(info.single_file, Some(PathBuf::from("main.rs")));
+    assert!(info.scope.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn git_verify_repo_plain_directory() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    let info = gitprint::git::verify_repo(dir.path()).await?;
+    assert!(!info.is_git);
+    assert!(info.single_file.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn git_verify_repo_plain_file() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    std::fs::write(dir.path().join("hello.rs"), "fn main() {}").unwrap();
+    let info = gitprint::git::verify_repo(&dir.path().join("hello.rs")).await?;
+    assert!(!info.is_git);
+    assert_eq!(info.single_file, Some(PathBuf::from("hello.rs")));
+    Ok(())
 }
 
 #[tokio::test]
@@ -98,7 +134,7 @@ async fn git_verify_repo_nonexistent_path() {
 async fn git_get_metadata() -> Result<(), Box<dyn std::error::Error>> {
     let repo = create_test_repo();
     let config = test_config(repo.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
-    let metadata = gitprint::git::get_metadata(repo.path(), &config).await?;
+    let metadata = gitprint::git::get_metadata(repo.path(), &config, true, None).await?;
 
     assert!(!metadata.name.is_empty());
     assert_eq!(metadata.branch, "main");
@@ -111,11 +147,24 @@ async fn git_get_metadata() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+async fn git_get_metadata_plain_directory() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    let config = test_config(dir.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
+    let metadata = gitprint::git::get_metadata(dir.path(), &config, false, None).await?;
+
+    assert!(!metadata.name.is_empty());
+    assert!(metadata.branch.is_empty());
+    assert!(metadata.commit_hash.is_empty());
+    assert!(metadata.commit_date.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn git_get_metadata_with_branch() -> Result<(), Box<dyn std::error::Error>> {
     let repo = create_test_repo();
     let mut config = test_config(repo.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
     config.branch = Some("main".to_string());
-    let metadata = gitprint::git::get_metadata(repo.path(), &config).await?;
+    let metadata = gitprint::git::get_metadata(repo.path(), &config, true, None).await?;
     assert_eq!(metadata.branch, "main");
     Ok(())
 }
@@ -124,13 +173,28 @@ async fn git_get_metadata_with_branch() -> Result<(), Box<dyn std::error::Error>
 async fn git_list_tracked_files() -> Result<(), Box<dyn std::error::Error>> {
     let repo = create_test_repo();
     let config = test_config(repo.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
-    let files = gitprint::git::list_tracked_files(repo.path(), &config).await?;
+    let files = gitprint::git::list_tracked_files(repo.path(), &config, true, None).await?;
 
     assert!(files.contains(&PathBuf::from("main.rs")));
     assert!(files.contains(&PathBuf::from("lib.rs")));
     assert!(files.contains(&PathBuf::from("src/util.rs")));
     assert!(files.contains(&PathBuf::from("README.md")));
     assert_eq!(files.len(), 4);
+    Ok(())
+}
+
+#[tokio::test]
+async fn git_list_files_plain_directory() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    std::fs::write(dir.path().join("hello.rs"), "fn main() {}").unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join("sub/world.rs"), "pub fn world() {}").unwrap();
+    let config = test_config(dir.path().to_path_buf(), PathBuf::from("/tmp/test.pdf"));
+    let files = gitprint::git::list_tracked_files(dir.path(), &config, false, None).await?;
+
+    assert!(files.contains(&PathBuf::from("hello.rs")));
+    assert!(files.contains(&PathBuf::from("sub/world.rs")));
+    assert_eq!(files.len(), 2);
     Ok(())
 }
 
@@ -249,6 +313,56 @@ async fn full_pipeline_letter_paper() -> Result<(), Box<dyn std::error::Error>> 
 
     gitprint::run(&config).await?;
     assert!(output_path.exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_pipeline_subdir() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = create_test_repo();
+    let out_dir = TempDir::new()?;
+    let output_path = out_dir.path().join("output.pdf");
+    // Point at the `src/` subdirectory inside the git repo.
+    let config = test_config(repo.path().join("src"), output_path.clone());
+
+    gitprint::run(&config).await?;
+
+    assert!(output_path.exists());
+    assert!(std::fs::metadata(&output_path)?.len() > 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_pipeline_single_file() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = create_test_repo();
+    let out_dir = TempDir::new()?;
+    let output_path = out_dir.path().join("output.pdf");
+    // Point directly at a single source file.
+    let config = test_config(repo.path().join("main.rs"), output_path.clone());
+
+    gitprint::run(&config).await?;
+
+    assert!(output_path.exists());
+    assert!(std::fs::metadata(&output_path)?.len() > 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_pipeline_plain_directory() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    std::fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(
+        dir.path().join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+    let out_dir = TempDir::new()?;
+    let output_path = out_dir.path().join("output.pdf");
+    let config = test_config(dir.path().to_path_buf(), output_path.clone());
+
+    gitprint::run(&config).await?;
+
+    assert!(output_path.exists());
+    assert!(std::fs::metadata(&output_path)?.len() > 0);
     Ok(())
 }
 

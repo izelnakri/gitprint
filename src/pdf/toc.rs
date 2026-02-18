@@ -90,7 +90,9 @@ mod tests {
         let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
         let mut builder = pdf::create_builder(&config, fonts);
-        let entries: Vec<_> = (0..100).map(|i| make_entry("src/file.rs", i * 10, i + 5)).collect();
+        let entries: Vec<_> = (0..100)
+            .map(|i| make_entry("src/file.rs", i * 10, i + 5))
+            .collect();
         super::render(&mut builder, &entries);
     }
 }

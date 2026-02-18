@@ -12,7 +12,7 @@ use crate::types::PaperSize;
     after_help = binary_size_info(),
 )]
 pub struct Args {
-    /// Path to git repository
+    /// Path to git repository or directory
     pub path: PathBuf,
 
     /// Output PDF file path

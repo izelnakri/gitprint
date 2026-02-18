@@ -26,7 +26,11 @@ pub fn create_builder(config: &Config, fonts: FontSet) -> PageBuilder {
     create_builder_at_page(config, fonts, 1)
 }
 
-pub fn create_builder_at_page(config: &Config, fonts: FontSet, starting_page: usize) -> PageBuilder {
+pub fn create_builder_at_page(
+    config: &Config,
+    fonts: FontSet,
+    starting_page: usize,
+) -> PageBuilder {
     let (w, h) = paper_dimensions(config);
     let line_height = config.font_size as f32 + 2.0;
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)

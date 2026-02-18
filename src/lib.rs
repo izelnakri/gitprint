@@ -17,6 +17,8 @@ pub mod types;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use crate::error::Error;
 use crate::types::{Config, HighlightedLine};
 
@@ -25,7 +27,8 @@ struct ProcessedFile {
     path: PathBuf,
     lines: Vec<HighlightedLine>,
     line_count: usize,
-    file_size: u64,
+    /// Pre-formatted size string, computed once to avoid calling format_size twice.
+    size_str: String,
     last_modified: String,
 }
 
@@ -49,57 +52,138 @@ fn format_elapsed(elapsed: std::time::Duration) -> String {
 
 /// Run the full pipeline: git → filter → highlight → PDF.
 ///
-/// Files are read and highlighted concurrently via tokio tasks,
-/// then rendered into the PDF sequentially.
+/// **Concurrency model**:
+/// - Initial git operations (metadata, file list, date map, highlighter init) run in parallel.
+/// - File reads use a tokio `JoinSet` (I/O-bound).
+/// - Syntax highlighting uses rayon `par_iter` via `spawn_blocking` (CPU-bound).
+/// - Dummy TOC/tree renders for page counting run in parallel via `rayon::join`.
+/// - Actual TOC and tree renders run in parallel via `rayon::join`.
 pub async fn run(config: &Config) -> Result<(), Error> {
     let start = std::time::Instant::now();
 
-    let repo_path = git::verify_repo(&config.repo_path).await?;
-    let mut metadata = git::get_metadata(&repo_path, config).await?;
+    let info = git::verify_repo(&config.repo_path).await?;
 
-    let all_paths = git::list_tracked_files(&repo_path, config).await?;
+    // Single-file mode: no cover page, TOC, or file tree — just render the file.
+    if let Some(ref single_file) = info.single_file {
+        let highlighter = highlight::Highlighter::new(&config.theme)?;
+        let (content_res, last_modified) = tokio::join!(
+            git::read_file_content(&info.root, single_file, config),
+            git::file_last_modified(&info.root, single_file, config, info.is_git),
+        );
+        let content = content_res?;
+        if filter::is_binary(content.as_bytes()) || filter::is_minified(&content) {
+            return Err(Error::Git(format!(
+                "{}: binary or minified file",
+                single_file.display()
+            )));
+        }
+        let line_count = content.lines().count();
+        let size_str = format_size(content.len() as u64);
+        let lines: Vec<HighlightedLine> =
+            highlighter.highlight_lines(&content, single_file).collect();
+
+        let mut doc = printpdf::PdfDocument::new("gitprint");
+        let fonts = pdf::fonts::load_fonts(&mut doc)?;
+        let mut builder = pdf::create_builder(config, fonts);
+        let file_info = format!("{line_count} LOC \u{00B7} {size_str} \u{00B7} {last_modified}");
+        pdf::code::render_file(
+            &mut builder,
+            &single_file.display().to_string(),
+            lines.into_iter(),
+            line_count,
+            !config.no_line_numbers,
+            config.font_size as u8,
+            &file_info,
+        );
+        let pages = builder.finish();
+        let total_pages = pages.len();
+        doc.with_pages(pages);
+        pdf::save_pdf(&doc, &config.output_path)?;
+
+        let elapsed = start.elapsed();
+        let pdf_size = std::fs::metadata(&config.output_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        eprintln!(
+            "{} — 1 file, {} pages, {}, {}",
+            config.output_path.display(),
+            total_pages,
+            format_size(pdf_size),
+            format_elapsed(elapsed),
+        );
+        return Ok(());
+    }
+
+    let repo_path = info.root;
+    let is_git = info.is_git;
+    let scope = info.scope;
+
+    // Parallel: git metadata + tracked file list + date map + highlighter init.
+    // All four are independent of each other once we have the repo path.
+    let (metadata_res, all_paths_res, date_map_res, highlighter_res) = tokio::join!(
+        git::get_metadata(&repo_path, config, is_git, scope.as_deref()),
+        git::list_tracked_files(&repo_path, config, is_git, scope.as_deref()),
+        git::file_last_modified_dates(&repo_path, config, is_git, scope.as_deref()),
+        async { highlight::Highlighter::new(&config.theme) },
+    );
+
+    let mut metadata = metadata_res?;
+    let highlighter = Arc::new(highlighter_res?);
+    let date_map = Arc::new(date_map_res?);
+
     let file_filter = filter::FileFilter::new(&config.include_patterns, &config.exclude_patterns)?;
-    let mut paths: Vec<_> = file_filter.filter_paths(all_paths).collect();
-    paths.sort();
+    let mut paths: Vec<_> = file_filter.filter_paths(all_paths_res?).collect();
+    paths.sort_unstable();
 
-    let highlighter = Arc::new(highlight::Highlighter::new(&config.theme)?);
-    let date_map = Arc::new(git::file_last_modified_dates(&repo_path, config).await?);
-
-    // Parallel: read + filter + highlight all files concurrently
-    let mut set = tokio::task::JoinSet::new();
+    // Phase 1 — I/O: read all file contents concurrently with tokio.
+    let mut read_set: tokio::task::JoinSet<Option<(PathBuf, String, String)>> =
+        tokio::task::JoinSet::new();
     paths.into_iter().for_each(|path| {
         let repo = repo_path.clone();
         let cfg = config.clone();
-        let hl = Arc::clone(&highlighter);
         let dates = Arc::clone(&date_map);
-
-        set.spawn(async move {
+        read_set.spawn(async move {
             let content = read_text_file(&repo, &path, &cfg).await?;
-            let file_size = content.len() as u64;
-            let line_count = content.lines().count();
             let last_modified = dates.get(&path).cloned().unwrap_or_default();
-            let lines: Vec<HighlightedLine> = hl.highlight_lines(&content, &path).collect();
-            Some(ProcessedFile {
-                path,
-                lines,
-                line_count,
-                file_size,
-                last_modified,
-            })
+            Some((path, content, last_modified))
         });
     });
+    let raw_files: Vec<(PathBuf, String, String)> =
+        read_set.join_all().await.into_iter().flatten().collect();
 
-    let mut files: Vec<ProcessedFile> = set.join_all().await.into_iter().flatten().collect();
+    // Phase 2 — CPU: highlight all files in parallel with rayon via spawn_blocking,
+    // keeping tokio worker threads free for I/O during this CPU-heavy phase.
+    let hl = Arc::clone(&highlighter);
+    let mut files: Vec<ProcessedFile> = tokio::task::spawn_blocking(move || {
+        raw_files
+            .into_par_iter()
+            .map(|(path, content, last_modified)| {
+                let line_count = content.lines().count();
+                let size_str = format_size(content.len() as u64);
+                let lines: Vec<HighlightedLine> = hl.highlight_lines(&content, &path).collect();
+                ProcessedFile {
+                    path,
+                    lines,
+                    line_count,
+                    size_str,
+                    last_modified,
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|_| Error::Git("highlight task panicked".to_string()))?;
+
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
     metadata.file_count = files.len();
     metadata.total_lines = files.iter().map(|f| f.line_count).sum();
 
-    // Build PDF document and load fonts once
+    // Build PDF document and load fonts once.
     let mut doc = printpdf::PdfDocument::new("gitprint");
     let fonts = pdf::fonts::load_fonts(&mut doc)?;
 
-    // -- Cover page (always page 1) --
+    // Cover page (always page 1).
     let cover_pages = {
         let mut b = pdf::create_builder(config, fonts.clone());
         pdf::cover::render(&mut b, &metadata);
@@ -107,55 +191,58 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     };
     let cover_count = cover_pages.len();
 
-    // Pre-collect tree paths (needed for both dummy + actual tree renders)
     let tree_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
-    // Build dummy TocEntry list (start_page=0 placeholders) to count TOC pages
+    // Dummy TOC entries (start_page=0) used purely to count how many pages the TOC occupies.
+    // Each entry is one line regardless of content, so page count is stable.
     let dummy_toc_entries: Vec<pdf::toc::TocEntry> = files
         .iter()
         .map(|f| pdf::toc::TocEntry {
             path: f.path.clone(),
             line_count: f.line_count,
-            size_str: format_size(f.file_size),
+            size_str: f.size_str.clone(),
             last_modified: f.last_modified.clone(),
             start_page: 0,
         })
         .collect();
 
-    // -- Count TOC pages (dummy render, page numbers don't affect line count) --
-    let toc_count = if config.toc {
-        let mut b = pdf::create_builder(config, fonts.clone());
-        pdf::toc::render(&mut b, &dummy_toc_entries);
-        b.finish().len()
-    } else {
-        0
-    };
+    // Count TOC pages and tree pages in parallel — both are independent CPU-bound renders.
+    let (toc_count, tree_count) = rayon::join(
+        || {
+            if config.toc {
+                let mut b = pdf::create_builder(config, fonts.clone());
+                pdf::toc::render(&mut b, &dummy_toc_entries);
+                b.finish().len()
+            } else {
+                0
+            }
+        },
+        || {
+            if config.file_tree {
+                let mut b = pdf::create_builder(config, fonts.clone());
+                pdf::tree::render(&mut b, &tree_paths);
+                b.finish().len()
+            } else {
+                0
+            }
+        },
+    );
 
-    // -- Count tree pages (dummy render) --
-    let tree_count = if config.file_tree {
-        let mut b = pdf::create_builder(config, fonts.clone());
-        pdf::tree::render(&mut b, &tree_paths);
-        b.finish().len()
-    } else {
-        0
-    };
-
-    // -- Render file content, tracking each file's starting page --
+    // Render file content sequentially, tracking each file's starting page.
     let file_base_page = cover_count + toc_count + tree_count + 1;
     let mut content_builder = pdf::create_builder_at_page(config, fonts.clone(), file_base_page);
     let mut toc_entries: Vec<pdf::toc::TocEntry> = Vec::with_capacity(files.len());
 
     files.into_iter().for_each(|file| {
         let start_page = content_builder.current_page();
-        let size_str = format_size(file.file_size);
         let info = format!(
             "{} LOC \u{00B7} {} \u{00B7} {}",
-            file.line_count, size_str, file.last_modified
+            file.line_count, file.size_str, file.last_modified
         );
         toc_entries.push(pdf::toc::TocEntry {
             path: file.path.clone(),
             line_count: file.line_count,
-            size_str,
+            size_str: file.size_str,
             last_modified: file.last_modified.clone(),
             start_page,
         });
@@ -171,26 +258,30 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     });
     let content_pages = content_builder.finish();
 
-    // -- Render actual TOC with real page numbers --
-    let toc_pages = if config.toc {
-        let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + 1);
-        pdf::toc::render(&mut b, &toc_entries);
-        b.finish()
-    } else {
-        vec![]
-    };
+    // Render actual TOC (with real page numbers) and tree in parallel.
+    let (toc_pages, tree_pages) = rayon::join(
+        || {
+            if config.toc {
+                let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + 1);
+                pdf::toc::render(&mut b, &toc_entries);
+                b.finish()
+            } else {
+                vec![]
+            }
+        },
+        || {
+            if config.file_tree {
+                let mut b =
+                    pdf::create_builder_at_page(config, fonts.clone(), cover_count + toc_count + 1);
+                pdf::tree::render(&mut b, &tree_paths);
+                b.finish()
+            } else {
+                vec![]
+            }
+        },
+    );
 
-    // -- Render actual tree with correct page offset --
-    let tree_pages = if config.file_tree {
-        let mut b =
-            pdf::create_builder_at_page(config, fonts.clone(), cover_count + toc_count + 1);
-        pdf::tree::render(&mut b, &tree_paths);
-        b.finish()
-    } else {
-        vec![]
-    };
-
-    // -- Assemble final document in order: cover → TOC → tree → files --
+    // Assemble final document: cover → TOC → tree → file content.
     let all_pages: Vec<_> = cover_pages
         .into_iter()
         .chain(toc_pages)

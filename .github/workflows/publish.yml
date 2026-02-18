@@ -1,0 +1,83 @@
+name: Publish PDF
+
+# Builds a syntax-highlighted PDF of the gitprint source and deploys it to GitHub Pages
+# on every push to main. The live PDF is browsable at https://<user>.github.io/gitprint/
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment runs at a time; cancel any in-progress run when a new push arrives.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history is required so git log can report accurate per-file modification dates.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Generate PDF
+        run: ./target/release/gitprint . --output gitprint.pdf
+
+      - name: Assemble site
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p _site
+          cp gitprint.pdf _site/gitprint.pdf
+          touch _site/.nojekyll
+          cat > _site/index.html << HTMLEOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>gitprint — source PDF</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              html, body { height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #e6edf3; }
+              body { display: flex; flex-direction: column; }
+              header { flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
+              header h1 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+              header a { font-size: 13px; color: #8b949e; text-decoration: none; }
+              header a:hover { color: #e6edf3; }
+              embed { flex: 1; width: 100%; border: none; }
+            </style>
+          </head>
+          <body>
+            <header>
+              <h1>gitprint</h1>
+              <a href="https://github.com/${REPO}">source</a>
+              <a href="gitprint.pdf">download PDF</a>
+            </header>
+            <embed src="gitprint.pdf" type="application/pdf">
+          </body>
+          </html>
+          HTMLEOF
+
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

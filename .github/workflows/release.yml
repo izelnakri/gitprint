@@ -1,0 +1,164 @@
+name: Release Binaries
+
+# Builds native binaries for every major platform and publishes them:
+#   - push to main/develop  →  nightly pre-release (gitprint-nightly-main, gitprint-nightly-develop)
+#   - push tag v*           →  versioned GitHub release with auto-generated notes
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+
+# Cancel any in-progress run for the same ref so pushes don't pile up.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Build ────────────────────────────────────────────────────────────────────
+  build:
+    name: Build · ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux — statically linked with musl, runs on any modern Linux distro
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: false
+
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true   # cross-compiled via the `cross` Docker toolchain
+
+          - target: aarch64-apple-darwin
+            os: macos-latest  # macos-14+, ARM64
+            cross: false
+
+          # Windows
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # musl-tools provides musl-gcc required for the x86_64-musl target.
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
+      # taiki-e/install-action downloads pre-built cross binaries — much faster than
+      # compiling from source with `cargo install cross`.
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: >
+          tar czf gitprint-${{ matrix.target }}.tar.gz
+          -C target/${{ matrix.target }}/release gitprint
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >
+          Compress-Archive
+          -Path   target/${{ matrix.target }}/release/gitprint.exe
+          -DestinationPath gitprint-${{ matrix.target }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitprint-${{ matrix.target }}
+          # Each job uploads exactly one archive; glob picks whichever extension was created.
+          path: gitprint-${{ matrix.target }}.*
+
+  # ── Publish ──────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create/delete GitHub releases and tags
+
+    steps:
+      # Needed to resolve `git log` for the nightly release description.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Download all five platform archives into a single directory.
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate SHA-256 checksums
+        run: cd artifacts && sha256sum * > checksums.txt
+
+      # ── Tagged release (e.g. v1.2.3) ────────────────────────────────────────
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*
+
+      # ── Nightly pre-release (branch push) ───────────────────────────────────
+      # The tag is derived from the branch name so main and develop get
+      # independent rolling releases: nightly-main, nightly-develop, etc.
+      - name: Publish nightly pre-release
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          TAG="nightly-${BRANCH//\//-}"
+
+          # Delete the previous nightly for this branch (tag + release) and recreate
+          # atomically so users always find a single up-to-date entry.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+          {
+            printf 'Automated development build from the `%s` branch.\n\n' "$BRANCH"
+            printf '> **Not recommended for production use.**\n\n'
+            printf '| | |\n|---|---|\n'
+            printf '| **Commit** | `%s` |\n' "${{ github.sha }}"
+            printf '| **Message** | %s |\n' "$COMMIT_MSG"
+          } > /tmp/notes.md
+
+          gh release create "$TAG" \
+            --prerelease \
+            --title "nightly ($BRANCH)" \
+            --notes-file /tmp/notes.md \
+            artifacts/*

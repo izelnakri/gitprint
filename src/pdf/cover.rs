@@ -21,6 +21,7 @@ pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata) {
         ("Lines:   ", &metadata.total_lines.to_string()),
     ]
     .into_iter()
+    .filter(|(_, value)| !value.is_empty())
     .for_each(|(label, value)| {
         builder.write_line_centered(&[
             Span {

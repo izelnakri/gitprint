@@ -62,7 +62,11 @@ impl PageBuilder {
 
     /// The page number currently being written, accounting for a pending deferred break.
     pub fn current_page(&self) -> usize {
-        if self.pending_break { self.page_count + 1 } else { self.page_count }
+        if self.pending_break {
+            self.page_count + 1
+        } else {
+            self.page_count
+        }
     }
 
     fn usable_height(&self) -> f32 {
@@ -212,7 +216,10 @@ impl PageBuilder {
         self.ensure_space(self.line_height);
         let y = self.pdf_y();
 
-        let total_width: f32 = spans.iter().map(|s| s.text.len() as f32 * s.size.0 * 0.6).sum();
+        let total_width: f32 = spans
+            .iter()
+            .map(|s| s.text.len() as f32 * s.size.0 * 0.6)
+            .sum();
         let x = ((self.page_width.into_pt().0 - total_width) / 2.0).max(0.0);
 
         self.current_ops.extend([
