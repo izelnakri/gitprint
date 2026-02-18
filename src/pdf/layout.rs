@@ -31,6 +31,7 @@ pub struct PageBuilder {
     margin: Mm,
     line_height: f32,
     page_count: usize,
+    pending_break: bool,
     fonts: FontSet,
 }
 
@@ -41,6 +42,7 @@ impl PageBuilder {
         margin: Mm,
         line_height: f32,
         fonts: FontSet,
+        starting_page: usize,
     ) -> Self {
         let mut builder = Self {
             pages: Vec::new(),
@@ -50,11 +52,17 @@ impl PageBuilder {
             page_height,
             margin,
             line_height,
-            page_count: 0,
+            page_count: starting_page.saturating_sub(1),
+            pending_break: false,
             fonts,
         };
         builder.start_new_page();
         builder
+    }
+
+    /// The page number currently being written, accounting for a pending deferred break.
+    pub fn current_page(&self) -> usize {
+        if self.pending_break { self.page_count + 1 } else { self.page_count }
     }
 
     fn usable_height(&self) -> f32 {
@@ -113,14 +121,25 @@ impl PageBuilder {
         ]);
     }
 
-    pub fn ensure_space(&mut self, needed_pt: f32) {
-        if self.remaining() < needed_pt {
-            self.page_break();
+    /// Flush a deferred page break: start the new page now.
+    fn flush_break(&mut self) {
+        if self.pending_break {
+            self.pending_break = false;
+            self.start_new_page();
         }
     }
 
+    pub fn ensure_space(&mut self, needed_pt: f32) {
+        self.flush_break();
+        if self.remaining() < needed_pt {
+            self.start_new_page();
+        }
+    }
+
+    /// Mark a section boundary. The new page is created lazily on the next write,
+    /// so finish() never produces a trailing empty page.
     pub fn page_break(&mut self) {
-        self.start_new_page();
+        self.pending_break = true;
     }
 
     pub fn write_line(&mut self, spans: &[Span]) {
@@ -187,6 +206,38 @@ impl PageBuilder {
         ]);
 
         self.y += size.0 + 4.0;
+    }
+
+    pub fn write_line_centered(&mut self, spans: &[Span]) {
+        self.ensure_space(self.line_height);
+        let y = self.pdf_y();
+
+        let total_width: f32 = spans.iter().map(|s| s.text.len() as f32 * s.size.0 * 0.6).sum();
+        let x = ((self.page_width.into_pt().0 - total_width) / 2.0).max(0.0);
+
+        self.current_ops.extend([
+            Op::StartTextSection,
+            Op::SetTextCursor {
+                pos: Point { x: Pt(x), y },
+            },
+        ]);
+        self.current_ops.extend(spans.iter().flat_map(|span| {
+            [
+                Op::SetFillColor {
+                    col: span.color.clone(),
+                },
+                Op::SetFontSize {
+                    size: span.size,
+                    font: span.font_id.clone(),
+                },
+                Op::WriteText {
+                    items: vec![TextItem::Text(span.text.clone())],
+                    font: span.font_id.clone(),
+                },
+            ]
+        }));
+        self.current_ops.push(Op::EndTextSection);
+        self.y += self.line_height;
     }
 
     pub fn write_line_justified(&mut self, left: &[Span], right: &[Span]) {
@@ -310,14 +361,14 @@ mod tests {
     #[test]
     fn builder_creates_at_least_one_page() {
         let (_doc, fonts) = test_font_set();
-        let pages = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts).finish();
+        let pages = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1).finish();
         assert_eq!(pages.len(), 1);
     }
 
     #[test]
     fn write_line_adds_content() {
         let (_doc, fonts) = test_font_set();
-        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone());
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
         builder.write_line(&[Span {
             text: "hello".into(),
             font_id: fonts.regular.clone(),
@@ -332,15 +383,41 @@ mod tests {
     #[test]
     fn page_break_creates_new_page() {
         let (_doc, fonts) = test_font_set();
-        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts);
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line(&[Span {
+            text: "page 1".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
         builder.page_break();
+        builder.write_line(&[Span {
+            text: "page 2".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
         assert_eq!(builder.finish().len(), 2);
+    }
+
+    #[test]
+    fn trailing_page_break_does_not_add_empty_page() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line(&[Span {
+            text: "content".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
+        builder.page_break();
+        assert_eq!(builder.finish().len(), 1);
     }
 
     #[test]
     fn write_centered_works() {
         let (_doc, fonts) = test_font_set();
-        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone());
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
         builder.write_centered("Title", &fonts.regular, Pt(28.0), black());
         assert_eq!(builder.finish().len(), 1);
     }
@@ -348,7 +425,7 @@ mod tests {
     #[test]
     fn many_lines_cause_page_overflow() {
         let (_doc, fonts) = test_font_set();
-        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone());
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
         (0..200).for_each(|_| {
             builder.write_line(&[Span {
                 text: "line".into(),

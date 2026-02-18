@@ -39,11 +39,21 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+fn format_elapsed(elapsed: std::time::Duration) -> String {
+    if elapsed.as_millis() < 1000 {
+        format!("{}ms", elapsed.as_millis())
+    } else {
+        format!("{:.1}s", elapsed.as_secs_f64())
+    }
+}
+
 /// Run the full pipeline: git → filter → highlight → PDF.
 ///
 /// Files are read and highlighted concurrently via tokio tasks,
 /// then rendered into the PDF sequentially.
 pub async fn run(config: &Config) -> Result<(), Error> {
+    let start = std::time::Instant::now();
+
     let repo_path = git::verify_repo(&config.repo_path).await?;
     let mut metadata = git::get_metadata(&repo_path, config).await?;
 
@@ -85,34 +95,72 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     metadata.file_count = files.len();
     metadata.total_lines = files.iter().map(|f| f.line_count).sum();
 
-    // Build PDF: create document, add fonts, then render pages sequentially
+    // Build PDF document and load fonts once
     let mut doc = printpdf::PdfDocument::new("gitprint");
     let fonts = pdf::fonts::load_fonts(&mut doc)?;
-    let mut builder = pdf::create_builder(config, fonts);
 
-    pdf::cover::render(&mut builder, &metadata);
+    // -- Cover page (always page 1) --
+    let cover_pages = {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::cover::render(&mut b, &metadata);
+        b.finish()
+    };
+    let cover_count = cover_pages.len();
 
-    if config.toc {
-        let toc_entries: Vec<(&Path, usize)> = files
-            .iter()
-            .map(|f| (f.path.as_path(), f.line_count))
-            .collect();
-        pdf::toc::render(&mut builder, &toc_entries);
-    }
+    // Pre-collect tree paths (needed for both dummy + actual tree renders)
+    let tree_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
-    if config.file_tree {
-        let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
-        pdf::tree::render(&mut builder, &paths);
-    }
+    // Build dummy TocEntry list (start_page=0 placeholders) to count TOC pages
+    let dummy_toc_entries: Vec<pdf::toc::TocEntry> = files
+        .iter()
+        .map(|f| pdf::toc::TocEntry {
+            path: f.path.clone(),
+            line_count: f.line_count,
+            size_str: format_size(f.file_size),
+            last_modified: f.last_modified.clone(),
+            start_page: 0,
+        })
+        .collect();
+
+    // -- Count TOC pages (dummy render, page numbers don't affect line count) --
+    let toc_count = if config.toc {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::toc::render(&mut b, &dummy_toc_entries);
+        b.finish().len()
+    } else {
+        0
+    };
+
+    // -- Count tree pages (dummy render) --
+    let tree_count = if config.file_tree {
+        let mut b = pdf::create_builder(config, fonts.clone());
+        pdf::tree::render(&mut b, &tree_paths);
+        b.finish().len()
+    } else {
+        0
+    };
+
+    // -- Render file content, tracking each file's starting page --
+    let file_base_page = cover_count + toc_count + tree_count + 1;
+    let mut content_builder = pdf::create_builder_at_page(config, fonts.clone(), file_base_page);
+    let mut toc_entries: Vec<pdf::toc::TocEntry> = Vec::with_capacity(files.len());
 
     files.into_iter().for_each(|file| {
+        let start_page = content_builder.current_page();
         let size_str = format_size(file.file_size);
         let info = format!(
-            "{} lines \u{00B7} {} \u{00B7} {}",
+            "{} LOC \u{00B7} {} \u{00B7} {}",
             file.line_count, size_str, file.last_modified
         );
+        toc_entries.push(pdf::toc::TocEntry {
+            path: file.path.clone(),
+            line_count: file.line_count,
+            size_str,
+            last_modified: file.last_modified.clone(),
+            start_page,
+        });
         pdf::code::render_file(
-            &mut builder,
+            &mut content_builder,
             &file.path.display().to_string(),
             file.lines.into_iter(),
             file.line_count,
@@ -121,15 +169,51 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             &info,
         );
     });
+    let content_pages = content_builder.finish();
 
-    doc.with_pages(builder.finish());
+    // -- Render actual TOC with real page numbers --
+    let toc_pages = if config.toc {
+        let mut b = pdf::create_builder_at_page(config, fonts.clone(), cover_count + 1);
+        pdf::toc::render(&mut b, &toc_entries);
+        b.finish()
+    } else {
+        vec![]
+    };
+
+    // -- Render actual tree with correct page offset --
+    let tree_pages = if config.file_tree {
+        let mut b =
+            pdf::create_builder_at_page(config, fonts.clone(), cover_count + toc_count + 1);
+        pdf::tree::render(&mut b, &tree_paths);
+        b.finish()
+    } else {
+        vec![]
+    };
+
+    // -- Assemble final document in order: cover → TOC → tree → files --
+    let all_pages: Vec<_> = cover_pages
+        .into_iter()
+        .chain(toc_pages)
+        .chain(tree_pages)
+        .chain(content_pages)
+        .collect();
+    let total_pages = all_pages.len();
+
+    doc.with_pages(all_pages);
     pdf::save_pdf(&doc, &config.output_path)?;
 
+    let elapsed = start.elapsed();
+    let pdf_size = std::fs::metadata(&config.output_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
     eprintln!(
-        "wrote {} files ({} lines) to {}",
+        "{} — {} files, {} pages, {}, {}",
+        config.output_path.display(),
         metadata.file_count,
-        metadata.total_lines,
-        config.output_path.display()
+        total_pages,
+        format_size(pdf_size),
+        format_elapsed(elapsed),
     );
 
     Ok(())

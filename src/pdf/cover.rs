@@ -22,7 +22,7 @@ pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata) {
     ]
     .into_iter()
     .for_each(|(label, value)| {
-        builder.write_line(&[
+        builder.write_line_centered(&[
             Span {
                 text: label.into(),
                 font_id: bold.clone(),
@@ -67,7 +67,7 @@ mod tests {
         let config = Config::test_default();
         let mut builder = pdf::create_builder(&config, fonts);
         super::render(&mut builder, &test_metadata());
-        assert!(builder.finish().len() >= 2);
+        assert!(!builder.finish().is_empty());
     }
 
     #[test]
