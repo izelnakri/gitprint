@@ -26,7 +26,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux — statically linked with musl, runs on any modern Linux distro
+          # Linux glibc — preferred by binstall on mainstream distros; uses glibc's fast allocator
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+
+          # Linux musl — statically linked, runs on Alpine / musl-based distros
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             cross: false
@@ -35,8 +40,14 @@ jobs:
             os: ubuntu-latest
             cross: true   # cross-compiled via the `cross` Docker toolchain
 
+          # macOS ARM (macos-14+ runner is ARM64)
           - target: aarch64-apple-darwin
-            os: macos-latest  # macos-14+, ARM64
+            os: macos-latest
+            cross: false
+
+          # macOS Intel
+          - target: x86_64-apple-darwin
+            os: macos-13
             cross: false
 
           # Windows
@@ -65,7 +76,7 @@ jobs:
 
       # musl-tools provides musl-gcc required for the x86_64-musl target.
       - name: Install musl toolchain
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: contains(matrix.target, 'musl') && !matrix.cross
         run: sudo apt-get install -y musl-tools
 
       # taiki-e/install-action downloads pre-built cross binaries — much faster than
@@ -78,6 +89,14 @@ jobs:
 
       - name: Build
         shell: bash
+        env:
+          # Explicitly reinforce all profile.release optimizations from Cargo.toml so
+          # they can't be silently overridden by toolchain defaults or stale cache.
+          CARGO_PROFILE_RELEASE_LTO: fat
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
+          CARGO_PROFILE_RELEASE_PANIC: abort
+          CARGO_PROFILE_RELEASE_STRIP: symbols
         run: |
           if [[ "${{ matrix.cross }}" == "true" ]]; then
             cross build --release --target ${{ matrix.target }}
@@ -119,7 +138,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Download all five platform archives into a single directory.
+      # Download all platform archives into a single directory.
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true

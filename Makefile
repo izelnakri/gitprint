@@ -13,7 +13,7 @@ help:
 	@echo "  test     Run all tests"
 	@echo "  build    Build the project"
 	@echo "  doc      Build and open API documentation"
-	@echo "  release  Auto-fix, validate, generate CHANGELOG, and publish (LEVEL=patch)"
+	@echo "  release  Preview changelog, confirm, then generate CHANGELOG and publish (LEVEL=patch)"
 
 fix:
 	cargo fmt
@@ -37,6 +37,15 @@ doc:
 	cargo doc --no-deps --open
 
 release: fix check
-	git-cliff --bump -o CHANGELOG.md
-	git add CHANGELOG.md
-	cargo release $(LEVEL) --execute
+	@printf "\n=== Release Preview (level: $(LEVEL)) ===\n\n"; \
+	git-cliff --bump --unreleased 2>/dev/null || true; \
+	printf "\nProceed with $(LEVEL) release? [y/N] "; \
+	read confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		git-cliff --bump -o CHANGELOG.md && \
+		git add CHANGELOG.md && \
+		cargo release $(LEVEL) --execute; \
+	else \
+		echo "Aborted."; \
+		exit 1; \
+	fi
