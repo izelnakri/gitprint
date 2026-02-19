@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.5] - 2026-02-19
+### Features
+- Metadata Page "Size" is now "Repo Size" or "FS Size" ([`ff181e4`](https://github.com/izelnakri/gitprint/commit/ff181e402793ef1fa7dfd3983da110dfd81fac7f))
+- ONLY ALLOW RELEASE OF BINARY mean benchmark < $REGRESSION_TRESHOLD ([`31acc68`](https://github.com/izelnakri/gitprint/commit/31acc68908b1a43066b93f28486b4c636f16fed7))
+
 ## [0.3.3] - 2026-02-19
 ### Features
 - Improve release workflow ([`e564a7e`](https://github.com/izelnakri/gitprint/commit/e564a7e11ef8f9131b7225ced78405dca6e196a6))
