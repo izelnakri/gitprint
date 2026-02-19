@@ -70,8 +70,12 @@ pub struct RepoMetadata {
     pub fs_group: Option<String>,
     /// UTC timestamp when this PDF was generated.
     pub generated_at: String,
-    /// Human-readable size of the repo/folder on disk (e.g. "4.2 MB").
+    /// Human-readable size of the git-tracked content (e.g. "4.2 MB").
+    /// Computed from `git ls-tree -r -l`; empty for non-git paths.
     pub repo_size: String,
+    /// Human-readable filesystem disk usage of the input path (e.g. "5.1 MB").
+    /// Computed from `du -sh`; empty for remote repos.
+    pub fs_size: String,
     /// Remote URL detected from git config (e.g. `git remote get-url origin`).
     /// Used to generate commit/author links even when `Config::remote_url` is None.
     pub detected_remote_url: Option<String>,
@@ -139,6 +143,7 @@ mod tests {
             fs_group: None,
             generated_at: "2024-01-15 10:00:00 UTC".to_string(),
             repo_size: "1.2 MB".to_string(),
+            fs_size: "1.5 MB".to_string(),
             detected_remote_url: None,
             repo_absolute_path: None,
         };

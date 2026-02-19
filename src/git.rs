@@ -276,6 +276,7 @@ pub async fn get_metadata(
             fs_group: None,
             generated_at: String::new(),
             repo_size: String::new(),
+            fs_size: String::new(),
             detected_remote_url: None,
             repo_absolute_path: None,
         });
@@ -339,6 +340,7 @@ pub async fn get_metadata(
         fs_group: None,
         generated_at: String::new(),
         repo_size: String::new(),
+        fs_size: String::new(),
         detected_remote_url,
         repo_absolute_path: None,
     })
@@ -599,11 +601,11 @@ pub async fn fs_owner_group(path: &Path) -> (Option<String>, Option<String>) {
     (None, None)
 }
 
-/// Returns the disk size of `path` as a human-readable string (e.g. `"4.2 MB"`).
+/// Returns the filesystem disk usage of `path` as a human-readable string (e.g. `"4.2 MB"`).
 ///
 /// Uses `du -sh` which is available on both Linux and macOS.
 /// Falls back to an empty string on failure.
-pub async fn repo_size(path: &Path) -> String {
+pub async fn fs_size(path: &Path) -> String {
     Command::new("du")
         .args(["-sh", &path.to_string_lossy()])
         .output()
@@ -616,6 +618,36 @@ pub async fn repo_size(path: &Path) -> String {
                 .and_then(|s| s.split_whitespace().next().map(str::to_string))
         })
         .unwrap_or_default()
+}
+
+/// Returns the total size of all git-tracked files as a human-readable string (e.g. `"3.8 MB"`).
+///
+/// Uses `git ls-tree -r -l` to sum blob sizes from the object database — this
+/// reflects actual tracked content without `.git/` overhead.
+/// Falls back to an empty string on failure.
+pub async fn git_tracked_size(repo_path: &Path, config: &Config) -> String {
+    let rev = config
+        .commit
+        .as_deref()
+        .or(config.branch.as_deref())
+        .unwrap_or("HEAD");
+    let output = run_git(repo_path, &["ls-tree", "-r", "-l", rev])
+        .await
+        .unwrap_or_default();
+    let total_bytes: u64 = output
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(3)?.parse::<u64>().ok())
+        .sum();
+    if total_bytes == 0 {
+        return String::new();
+    }
+    if total_bytes < 1024 {
+        format!("{total_bytes} B")
+    } else if total_bytes < 1_048_576 {
+        format!("{:.1} KB", total_bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", total_bytes as f64 / 1_048_576.0)
+    }
 }
 
 /// Normalizes a git remote URL to an `https://` URL.

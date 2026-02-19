@@ -210,7 +210,17 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     let fs_path2 = config.repo_path.clone();
     let is_remote = config.remote_url.is_some();
     let generated_at = format_utc_now();
-    let (metadata_res, all_paths_res, date_map_res, highlighter_res, fs_owner_group, size) = tokio::join!(
+    let repo_path_for_git_size = repo_path.clone();
+    let config_for_git_size = config.clone();
+    let (
+        metadata_res,
+        all_paths_res,
+        date_map_res,
+        highlighter_res,
+        fs_owner_group,
+        git_repo_size,
+        fs_size,
+    ) = tokio::join!(
         git::get_metadata(&repo_path, config, is_git, scope.as_deref()),
         git::list_tracked_files(&repo_path, config, is_git, scope.as_deref()),
         git::file_last_modified_dates(&repo_path, config, is_git, scope.as_deref()),
@@ -222,7 +232,20 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
                 git::fs_owner_group(&fs_path).await
             }
         },
-        git::repo_size(&fs_path2),
+        async move {
+            if is_git {
+                git::git_tracked_size(&repo_path_for_git_size, &config_for_git_size).await
+            } else {
+                String::new()
+            }
+        },
+        async move {
+            if is_remote {
+                String::new()
+            } else {
+                git::fs_size(&fs_path2).await
+            }
+        },
     );
 
     let mut metadata = metadata_res?;
@@ -232,7 +255,8 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     metadata.fs_owner = fs_owner_group.0;
     metadata.fs_group = fs_owner_group.1;
     metadata.generated_at = generated_at;
-    metadata.repo_size = size;
+    metadata.repo_size = git_repo_size;
+    metadata.fs_size = fs_size;
     if !is_remote {
         metadata.repo_absolute_path = Some(repo_path.clone());
     }
