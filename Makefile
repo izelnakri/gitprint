@@ -42,6 +42,12 @@ release: fix check
 	printf "\nProceed with $(LEVEL) release? [y/N] " > /dev/tty; \
 	read confirm < /dev/tty; \
 	case "$$confirm" in \
-		[yY]*) cargo release $(LEVEL) --execute ;; \
+		[yY]*) \
+			cargo release $(LEVEL) --execute; \
+			TAG=$$(git describe --tags --abbrev=0); \
+			awk '/^## \[/{if(found) exit; found=1} found' CHANGELOG.md > /tmp/release-notes.md; \
+			gh release create "$$TAG" --title "$$TAG" --notes-file /tmp/release-notes.md; \
+			rm -f /tmp/release-notes.md \
+		;; \
 		*) echo "Aborted."; exit 1 ;; \
 	esac
