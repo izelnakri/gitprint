@@ -207,7 +207,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     // tokio worker threads free for the concurrent I/O-bound git calls.
     let theme = config.theme.clone();
     let fs_path = config.repo_path.clone();
-    let fs_path2 = config.repo_path.clone();
+    let fs_path2 = repo_path.clone();
     let is_remote = config.remote_url.is_some();
     let generated_at = format_utc_now();
     let repo_path_for_git_size = repo_path.clone();
@@ -243,7 +243,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
             if is_remote {
                 String::new()
             } else {
-                git::fs_size(&fs_path2).await
+                git::fs_dir_size(&fs_path2).await
             }
         },
     );

@@ -601,23 +601,57 @@ pub async fn fs_owner_group(path: &Path) -> (Option<String>, Option<String>) {
     (None, None)
 }
 
-/// Returns the filesystem disk usage of `path` as a human-readable string (e.g. `"4.2 MB"`).
+/// Formats a byte count as a human-readable string using binary prefixes.
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1_024 {
+        format!("{bytes} B")
+    } else if bytes < 1_048_576 {
+        format!("{:.1} KB", bytes as f64 / 1_024.0)
+    } else if bytes < 1_073_741_824 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    }
+}
+
+/// Recursive half of `fs_dir_size`: sums the byte sizes of all regular files under `dir`.
+fn sum_dir_bytes(dir: PathBuf) -> Pin<Box<dyn Future<Output = u64> + Send>> {
+    Box::pin(async move {
+        let mut rd = match tokio::fs::read_dir(&dir).await {
+            Ok(rd) => rd,
+            Err(_) => return 0,
+        };
+        let mut total = 0u64;
+        let mut set: tokio::task::JoinSet<u64> = tokio::task::JoinSet::new();
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            let Ok(ft) = entry.file_type().await else {
+                continue;
+            };
+            if ft.is_dir() {
+                set.spawn(sum_dir_bytes(entry.path()));
+            } else if ft.is_file() {
+                if let Ok(m) = entry.metadata().await {
+                    total += m.len();
+                }
+            }
+        }
+        total += set.join_all().await.into_iter().sum::<u64>();
+        total
+    })
+}
+
+/// Returns the total size of all files under `path` as a human-readable string (e.g. `"4.2 MB"`).
 ///
-/// Uses `du -sh` which is available on both Linux and macOS.
-/// Falls back to an empty string on failure.
-pub async fn fs_size(path: &Path) -> String {
-    Command::new("du")
-        .args(["-sh", &path.to_string_lossy()])
-        .output()
-        .await
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            String::from_utf8(o.stdout)
-                .ok()
-                .and_then(|s| s.split_whitespace().next().map(str::to_string))
-        })
-        .unwrap_or_default()
+/// Recursively sums actual file content bytes (not disk-block allocations) using
+/// async I/O — no subprocess, no platform-specific tools, consistent formatting.
+/// Returns an empty string if `path` is inaccessible or contains no files.
+pub async fn fs_dir_size(path: &Path) -> String {
+    let total = sum_dir_bytes(path.to_path_buf()).await;
+    if total == 0 {
+        String::new()
+    } else {
+        format_bytes(total)
+    }
 }
 
 /// Returns the total size of all git-tracked files as a human-readable string (e.g. `"3.8 MB"`).
@@ -641,13 +675,7 @@ pub async fn git_tracked_size(repo_path: &Path, config: &Config) -> String {
     if total_bytes == 0 {
         return String::new();
     }
-    if total_bytes < 1024 {
-        format!("{total_bytes} B")
-    } else if total_bytes < 1_048_576 {
-        format!("{:.1} KB", total_bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", total_bytes as f64 / 1_048_576.0)
-    }
+    format_bytes(total_bytes)
 }
 
 /// Normalizes a git remote URL to an `https://` URL.
