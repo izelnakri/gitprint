@@ -58,8 +58,16 @@ bench-check:
 # results alongside the changelog preview before deciding to confirm the release.
 # After a successful cargo release the "current" results are promoted to the new
 # baseline so the next release compares against the just-shipped version.
-release: fix check bench-check
-	@printf "\n=== Release Preview (level: $(LEVEL)) ===\n\n"; \
+# If not already inside a nix shell, re-enters via `nix develop` so git-cliff
+# and cargo-release are available. `exec` replaces the shell process, preventing
+# any subsequent commands from running outside nix.
+release:
+	@if [ -z "$$IN_NIX_SHELL" ]; then \
+		echo "==> Entering nix develop (git-cliff, cargo-release)..."; \
+		exec nix develop --command $(MAKE) release LEVEL=$(LEVEL) REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD); \
+	fi; \
+	$(MAKE) fix check bench-check; \
+	printf "\n=== Release Preview (level: $(LEVEL)) ===\n\n"; \
 	git-cliff --bump --unreleased 2>/dev/null || true; \
 	printf "\nProceed with $(LEVEL) release? [y/N] " > /dev/tty; \
 	read confirm < /dev/tty; \

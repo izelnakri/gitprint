@@ -36,6 +36,18 @@ nix profile install github:izelnakri/gitprint
 cargo install --git https://github.com/izelnakri/gitprint
 ```
 
+### With Docker
+
+No install needed — pull the latest nightly image from GitHub Container Registry and mount your repository:
+
+```sh
+docker run --rm -w /repo -v "$(pwd):/repo" ghcr.io/izelnakri/gitprint:nightly . -o output.pdf
+```
+
+- `--rm` removes the container after use
+- `-w /repo` sets the working directory inside the container so `.` resolves correctly
+- `-v "$(pwd):/repo"` mounts the current directory; the output PDF is written back to it
+
 ## Usage
 
 ```sh
