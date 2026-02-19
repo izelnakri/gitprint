@@ -1,4 +1,5 @@
 /target
 /result
+/bench-baseline
 *.pdf
 TODO

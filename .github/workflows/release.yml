@@ -18,6 +18,38 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ── Benchmark regression gate ─────────────────────────────────────────────────
+  # Runs before publish on every release event (branch push or version tag).
+  # Uses the same scripts/check_benchmarks.py that 'make release' calls locally,
+  # so local and CI checks are always in sync.
+  benchmark:
+    name: Benchmark regression check
+    runs-on: ubuntu-latest
+    env:
+      REGRESSION_THRESHOLD: "20"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-bench
+
+      # Restore the latest main-branch baseline produced by ci.yml.
+      # Exact-key match won't hit for tag SHAs; prefix fallback finds the
+      # most recent baseline saved from a main-branch run.
+      - name: Restore benchmark baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: bench-baseline
+          key: bench-baseline-${{ github.sha }}
+          restore-keys: bench-baseline-
+
+      - name: Run benchmarks
+        run: cargo bench --bench pipeline -- --save-baseline current
+
+      - name: Check for performance regressions
+        run: python3 scripts/check_benchmarks.py
+
   # ── Build ────────────────────────────────────────────────────────────────────
   build:
     name: Build · ${{ matrix.target }}
@@ -122,7 +154,7 @@ jobs:
   # ── Publish ──────────────────────────────────────────────────────────────────
   publish:
     name: Publish release
-    needs: build
+    needs: [build, benchmark]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # required to create/delete GitHub releases and tags
