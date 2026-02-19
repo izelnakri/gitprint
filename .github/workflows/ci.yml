@@ -19,6 +19,7 @@ jobs:
       - run: cargo test
 
   package:
+    needs: [check]
     runs-on: ubuntu-latest
     permissions:
       packages: write

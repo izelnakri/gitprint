@@ -19,11 +19,13 @@ env:
 
 jobs:
   # ── Benchmark regression gate ─────────────────────────────────────────────────
-  # Runs before publish on every release event (branch push or version tag).
-  # Uses the same scripts/check_benchmarks.py that 'make release' calls locally,
-  # so local and CI checks are always in sync.
+  # Only runs for tag pushes. Branch pushes to main already go through the
+  # benchmark job in ci.yml, so re-running here would duplicate effort.
+  # Skipped jobs count as success in GitHub Actions, so publish still runs
+  # for nightly branch releases without waiting for this job.
   benchmark:
     name: Benchmark regression check
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     env:
       REGRESSION_THRESHOLD: "20"
@@ -150,6 +152,47 @@ jobs:
           name: gitprint-${{ matrix.target }}
           # Each job uploads exactly one archive; glob picks whichever extension was created.
           path: gitprint-${{ matrix.target }}.*
+
+  # ── Docker image (versioned tags only) ───────────────────────────────────────
+  # Publishes ghcr.io/izelnakri/gitprint:<version>, <major>.<minor>, and latest.
+  # Nightly Docker images (pushed on every main-branch commit) are handled by
+  # ci.yml's package job — no duplication needed here for branch pushes.
+  package:
+    name: Publish Docker image
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [benchmark]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derives: v0.3.4  →  tags 0.3.4, 0.3, and latest.
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ── Publish ──────────────────────────────────────────────────────────────────
   publish:
