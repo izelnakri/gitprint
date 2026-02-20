@@ -9,9 +9,11 @@ pub mod cli;
 pub mod defaults;
 pub mod filter;
 pub mod git;
+pub mod github;
 pub mod highlight;
 pub mod pdf;
 pub mod types;
+pub mod user_report;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

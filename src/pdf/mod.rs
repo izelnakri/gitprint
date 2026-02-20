@@ -1,15 +1,19 @@
 pub mod code;
 pub mod cover;
+pub mod diff;
 pub mod fonts;
 pub mod layout;
 pub mod toc;
 pub mod tree;
+pub mod user_activity;
+pub mod user_cover;
+pub mod user_repos;
 
 use std::path::Path;
 
 use printpdf::{Mm, PdfDocument, PdfSaveOptions};
 
-use crate::types::{Config, PaperSize};
+use crate::types::{Config, PaperSize, UserReportConfig};
 use layout::{FontSet, PageBuilder};
 
 fn paper_dimensions(config: &Config) -> (Mm, Mm) {
@@ -31,6 +35,25 @@ pub fn create_builder_at_page(
     starting_page: usize,
 ) -> PageBuilder {
     let (w, h) = paper_dimensions(config);
+    let line_height = config.font_size as f32 + 2.0;
+    PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
+}
+
+pub fn create_user_builder(config: &UserReportConfig, fonts: FontSet) -> PageBuilder {
+    create_user_builder_at_page(config, fonts, 1)
+}
+
+pub fn create_user_builder_at_page(
+    config: &UserReportConfig,
+    fonts: FontSet,
+    starting_page: usize,
+) -> PageBuilder {
+    let (w, h) = match config.paper_size {
+        PaperSize::A4 => (Mm(210.0), Mm(297.0)),
+        PaperSize::Letter => (Mm(215.9), Mm(279.4)),
+        PaperSize::Legal => (Mm(215.9), Mm(355.6)),
+    };
+    let (w, h) = if config.landscape { (h, w) } else { (w, h) };
     let line_height = config.font_size as f32 + 2.0;
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
 }

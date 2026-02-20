@@ -1,5 +1,28 @@
 use std::path::PathBuf;
 
+/// Configuration for a `gitprint user` run.
+#[derive(Debug, Clone)]
+pub struct UserReportConfig {
+    pub username: String,
+    pub output_path: PathBuf,
+    pub paper_size: PaperSize,
+    pub landscape: bool,
+    /// Number of top-starred repos to include (0 = skip section).
+    pub top_starred: usize,
+    /// Number of most-recently-active repos to include (0 = skip section).
+    pub last_repos: usize,
+    /// Number of most-recently-pushed repos to include (0 = skip section).
+    pub last_committed: usize,
+    /// Number of recent commits with diffs to render (0 = skip diffs).
+    pub commits: usize,
+    /// Skip diff rendering entirely.
+    pub no_diffs: bool,
+    /// Font size used for diff/code blocks.
+    pub font_size: f64,
+    /// GitHub personal access token (`GITHUB_TOKEN` env var).
+    pub github_token: Option<String>,
+}
+
 /// Paper size for PDF output.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PaperSize {

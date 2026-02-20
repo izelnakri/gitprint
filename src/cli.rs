@@ -14,7 +14,11 @@ use crate::types::PaperSize;
 )]
 pub struct Args {
     /// Path to a git repository, directory, file, or remote URL (https://, git@, ssh://)
-    pub path: String,
+    pub path: Option<String>,
+
+    /// GitHub username — generates a user activity report PDF instead of printing a repo
+    #[arg(short = 'u', long = "user")]
+    pub user: Option<String>,
 
     /// Output PDF file path
     #[arg(short, long)]
@@ -67,6 +71,27 @@ pub struct Args {
     /// List available syntax themes and exit
     #[arg(long)]
     pub list_themes: bool,
+
+    // ── User-report flags (only meaningful with -u/--user) ─────────────────────
+    /// Number of top-starred repos to include in the user report [default: 5]
+    #[arg(long, default_value_t = 5)]
+    pub top_starred: usize,
+
+    /// Number of most-recently-active repos to include in the user report [default: 5]
+    #[arg(long, default_value_t = 5)]
+    pub last_repos: usize,
+
+    /// Number of most-recently-pushed repos to include in the user report [default: 5]
+    #[arg(long, default_value_t = 5)]
+    pub last_committed: usize,
+
+    /// Number of recent commits with diffs to render in the user report [default: 5]
+    #[arg(long, default_value_t = 5)]
+    pub commits: usize,
+
+    /// Skip commit diff rendering in the user report (faster)
+    #[arg(long)]
+    pub no_diffs: bool,
 }
 
 fn after_help_text() -> &'static str {
@@ -95,32 +120,80 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn requires_path_argument() {
+    fn requires_path_or_user() {
+        // No args → clap triggers arg_required_else_help, parsing fails
         assert!(Args::try_parse_from(["gitprint"]).is_err());
     }
 
     #[test]
     fn accepts_path() {
         let args = Args::parse_from(["gitprint", "."]);
-        assert_eq!(args.path, ".");
+        assert_eq!(args.path, Some(".".to_string()));
     }
 
     #[test]
     fn custom_path() {
         let args = Args::parse_from(["gitprint", "/tmp/repo"]);
-        assert_eq!(args.path, "/tmp/repo");
+        assert_eq!(args.path, Some("/tmp/repo".to_string()));
     }
 
     #[test]
     fn accepts_https_url() {
         let args = Args::parse_from(["gitprint", "https://github.com/user/repo"]);
-        assert_eq!(args.path, "https://github.com/user/repo");
+        assert_eq!(args.path, Some("https://github.com/user/repo".to_string()));
     }
 
     #[test]
     fn accepts_ssh_url() {
         let args = Args::parse_from(["gitprint", "git@github.com:user/repo.git"]);
-        assert_eq!(args.path, "git@github.com:user/repo.git");
+        assert_eq!(args.path, Some("git@github.com:user/repo.git".to_string()));
+    }
+
+    #[test]
+    fn user_flag_short() {
+        let args = Args::parse_from(["gitprint", "-u", "izelnakri"]);
+        assert_eq!(args.user, Some("izelnakri".to_string()));
+        assert_eq!(args.path, None);
+    }
+
+    #[test]
+    fn user_flag_long() {
+        let args = Args::parse_from(["gitprint", "--user", "torvalds"]);
+        assert_eq!(args.user, Some("torvalds".to_string()));
+    }
+
+    #[test]
+    fn user_flag_with_output() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "-o", "alice.pdf"]);
+        assert_eq!(args.user, Some("alice".to_string()));
+        assert_eq!(args.output, Some(PathBuf::from("alice.pdf")));
+    }
+
+    #[test]
+    fn user_report_flags_defaults() {
+        let args = Args::parse_from(["gitprint", "-u", "alice"]);
+        assert_eq!(args.top_starred, 5);
+        assert_eq!(args.last_repos, 5);
+        assert_eq!(args.last_committed, 5);
+        assert_eq!(args.commits, 5);
+        assert!(!args.no_diffs);
+    }
+
+    #[test]
+    fn user_report_flags_custom() {
+        let args = Args::parse_from([
+            "gitprint",
+            "-u",
+            "alice",
+            "--top-starred",
+            "10",
+            "--commits",
+            "3",
+            "--no-diffs",
+        ]);
+        assert_eq!(args.top_starred, 10);
+        assert_eq!(args.commits, 3);
+        assert!(args.no_diffs);
     }
 
     #[test]
@@ -156,7 +229,7 @@ mod tests {
             "--landscape",
             "--list-themes",
         ]);
-        assert_eq!(args.path, "https://github.com/user/repo");
+        assert_eq!(args.path, Some("https://github.com/user/repo".to_string()));
         assert_eq!(args.output, Some(PathBuf::from("out.pdf")));
         assert_eq!(args.theme, "Solarized (dark)");
         assert_eq!(args.font_size, 10.0);
