@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6] - 2026-02-20
+### Documentation
+- Add Docker installation guide & nix-aware make release ([`b0486ac`](https://github.com/izelnakri/gitprint/commit/b0486ac10fbc008f181ecec2afd5b398516b000e))
+
+### Features
+- Fix FS Size display & add docker nightly builds ([`0f47d9b`](https://github.com/izelnakri/gitprint/commit/0f47d9b005cc1d42a604e19ae30d07a142732f8c))
+- -u flag now generates user reports! ([`a849ab9`](https://github.com/izelnakri/gitprint/commit/a849ab98a6ad860546b4957c9e2101c957f64c62))
+
 ## [0.3.5] - 2026-02-19
 ### Features
 - Metadata Page "Size" is now "Repo Size" or "FS Size" ([`ff181e4`](https://github.com/izelnakri/gitprint/commit/ff181e402793ef1fa7dfd3983da110dfd81fac7f))
