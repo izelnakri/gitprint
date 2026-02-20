@@ -10,7 +10,7 @@ pub fn render(
     title: &str,
     repos: &[GitHubRepo],
     events: &[GitHubEvent],
-    commit_msgs: &std::collections::HashMap<String, Vec<String>>,
+    commit_msgs: &std::collections::HashMap<String, String>,
 ) {
     if repos.is_empty() {
         return;
@@ -111,6 +111,11 @@ pub fn render(
                 .as_str()
                 .unwrap_or("")
                 .trim_start_matches("refs/heads/");
+            // Prefer a direct link to the HEAD commit; fall back to the branch tree.
+            let push_url = ev.payload["head"]
+                .as_str()
+                .map(|sha| format!("https://github.com/{}/commit/{sha}", repo.full_name))
+                .unwrap_or_else(|| format!("https://github.com/{}/tree/{branch}", repo.full_name));
             // Commit messages from the event payload (present for normal pushes).
             let from_payload: Vec<String> = ev.payload["commits"]
                 .as_array()
@@ -120,11 +125,12 @@ pub fn render(
                 .map(|m| m.lines().next().unwrap_or(m).to_string())
                 .take(2)
                 .collect();
-            // Fall back to API-fetched messages (force push / rebase gave empty payload).
+            // Fall back to API-fetched message via HEAD SHA (force push / rebase gave empty payload).
             let commits = if from_payload.is_empty() {
-                commit_msgs
-                    .get(&repo.full_name)
-                    .map(|msgs| msgs.iter().take(2).cloned().collect::<Vec<_>>())
+                ev.payload["head"]
+                    .as_str()
+                    .and_then(|sha| commit_msgs.get(sha))
+                    .map(|msg| vec![msg.clone()])
                     .unwrap_or_default()
             } else {
                 from_payload
@@ -137,6 +143,7 @@ pub fn render(
                     size: Pt(7.5),
                     color: dark_gray.clone(),
                 }]);
+                builder.add_link(builder.line_height(), Actions::Uri(push_url));
             } else {
                 builder.write_line(&[Span {
                     text: format!("  \u{2192} pushed to {branch}:"),
@@ -144,6 +151,7 @@ pub fn render(
                     size: Pt(7.5),
                     color: dark_gray.clone(),
                 }]);
+                builder.add_link(builder.line_height(), Actions::Uri(push_url));
                 commits.iter().for_each(|msg| {
                     builder.write_line(&[Span {
                         text: format!("      {msg}"),
@@ -161,6 +169,7 @@ pub fn render(
                 size: Pt(7.5),
                 color: dark_gray.clone(),
             }]);
+            builder.add_link(builder.line_height(), Actions::Uri(repo.html_url.clone()));
         }
 
         builder.vertical_space(4.0);

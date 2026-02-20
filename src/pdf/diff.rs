@@ -1,11 +1,18 @@
-use printpdf::{Color, Pt, Rgb};
+use printpdf::{Actions, Color, Pt, Rgb};
 
 use super::layout::{PageBuilder, Span};
 use crate::github::CommitDetail;
 
-pub fn render_commit(builder: &mut PageBuilder, detail: &CommitDetail, font_size: f32) {
+pub fn render_commit(
+    builder: &mut PageBuilder,
+    detail: &CommitDetail,
+    repo: &str,
+    branch: Option<&str>,
+    font_size: f32,
+) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();
+    let italic = builder.font(false, true).clone();
     let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
     let gray = Color::Rgb(Rgb::new(0.47, 0.47, 0.47, None));
     let dark_gray = Color::Rgb(Rgb::new(0.3, 0.3, 0.3, None));
@@ -35,14 +42,30 @@ pub fn render_commit(builder: &mut PageBuilder, detail: &CommitDetail, font_size
 
     builder.ensure_space(builder.line_height() * 4.0);
 
-    // ── Commit header ──────────────────────────────────────────────────────────
-    builder.write_line(&[
+    // ── Commit header: sha · repo (branch) · author · date · ±stats ─────────
+    let mut header_spans = vec![
         Span {
             text: format!("{sha_short}  "),
             font_id: bold.clone(),
             size: Pt(font_size),
             color: dark_gray.clone(),
         },
+        Span {
+            text: format!("{repo}  "),
+            font_id: regular.clone(),
+            size: Pt(font_size),
+            color: dark_gray.clone(),
+        },
+    ];
+    if let Some(b) = branch {
+        header_spans.push(Span {
+            text: format!("({b})  "),
+            font_id: italic.clone(),
+            size: Pt(font_size),
+            color: gray.clone(),
+        });
+    }
+    header_spans.extend([
         Span {
             text: format!("{author}  "),
             font_id: regular.clone(),
@@ -62,14 +85,17 @@ pub fn render_commit(builder: &mut PageBuilder, detail: &CommitDetail, font_size
             color: dark_gray.clone(),
         },
     ]);
+    builder.write_line(&header_spans);
+    builder.add_link(builder.line_height(), Actions::Uri(detail.html_url.clone()));
 
-    // Commit message
+    // Commit message — also links to the commit page.
     builder.write_line(&[Span {
         text: format!("  {message_first_line}"),
         font_id: bold.clone(),
         size: Pt(font_size),
         color: black.clone(),
     }]);
+    builder.add_link(builder.line_height(), Actions::Uri(detail.html_url.clone()));
 
     builder.vertical_space(4.0);
 
@@ -77,7 +103,7 @@ pub fn render_commit(builder: &mut PageBuilder, detail: &CommitDetail, font_size
     detail.files.iter().for_each(|file| {
         builder.ensure_space(builder.line_height() * 3.0);
 
-        // File header line
+        // File header line — links to the file at this commit on GitHub.
         builder.write_line(&[
             Span {
                 text: format!("  {} ", file.filename),
@@ -92,6 +118,11 @@ pub fn render_commit(builder: &mut PageBuilder, detail: &CommitDetail, font_size
                 color: dark_gray.clone(),
             },
         ]);
+        let file_url = format!(
+            "https://github.com/{repo}/blob/{}/{}",
+            detail.sha, file.filename
+        );
+        builder.add_link(builder.line_height(), Actions::Uri(file_url));
 
         match &file.patch {
             None => {
@@ -177,7 +208,13 @@ mod tests {
         let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
         let mut builder = pdf::create_builder(&config, fonts);
-        super::render_commit(&mut builder, &test_detail(true), 8.0);
+        super::render_commit(
+            &mut builder,
+            &test_detail(true),
+            "alice/repo",
+            Some("main"),
+            8.0,
+        );
         assert!(!builder.finish().is_empty());
     }
 
@@ -187,7 +224,7 @@ mod tests {
         let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
         let config = Config::test_default();
         let mut builder = pdf::create_builder(&config, fonts);
-        super::render_commit(&mut builder, &test_detail(false), 8.0);
+        super::render_commit(&mut builder, &test_detail(false), "alice/repo", None, 8.0);
         assert!(!builder.finish().is_empty());
     }
 
@@ -199,7 +236,7 @@ mod tests {
         let mut builder = pdf::create_builder(&config, fonts);
         let mut detail = test_detail(false);
         detail.files.clear();
-        super::render_commit(&mut builder, &detail, 8.0);
+        super::render_commit(&mut builder, &detail, "alice/repo", Some("dev"), 8.0);
         assert!(!builder.finish().is_empty());
     }
 }

@@ -1,5 +1,14 @@
 use std::path::PathBuf;
 
+/// Activity filter for the user report event feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ActivityFilter {
+    /// Show all event types (pushes, PRs, issues, stars, etc.)
+    All,
+    /// Show only push events (commits to repos)
+    Commits,
+}
+
 /// Configuration for a `gitprint user` run.
 #[derive(Debug, Clone)]
 pub struct UserReportConfig {
@@ -7,10 +16,6 @@ pub struct UserReportConfig {
     pub output_path: PathBuf,
     pub paper_size: PaperSize,
     pub landscape: bool,
-    /// Number of top-starred repos to include (0 = skip section).
-    pub top_starred: usize,
-    /// Number of most-recently-active repos to include (0 = skip section).
-    pub last_repos: usize,
     /// Number of most-recently-pushed repos to include (0 = skip section).
     pub last_committed: usize,
     /// Number of recent commits with diffs to render (0 = skip diffs).
@@ -21,6 +26,14 @@ pub struct UserReportConfig {
     pub font_size: f64,
     /// GitHub personal access token (`GITHUB_TOKEN` env var).
     pub github_token: Option<String>,
+    /// Earliest date to include events from, in `YYYY-MM-DD` form (`None` = no lower bound).
+    pub since: Option<String>,
+    /// Latest date to include events from, in `YYYY-MM-DD` form (`None` = no upper bound).
+    pub until: Option<String>,
+    /// Which event types to include in the report.
+    pub activity: ActivityFilter,
+    /// Maximum number of events to show in the activity feed.
+    pub events: usize,
 }
 
 /// Paper size for PDF output.

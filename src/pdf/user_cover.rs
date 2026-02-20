@@ -201,13 +201,15 @@ mod tests {
             output_path: "/tmp/alice.pdf".into(),
             paper_size: crate::types::PaperSize::A4,
             landscape: false,
-            top_starred: 5,
-            last_repos: 5,
             last_committed: 5,
             commits: 5,
             no_diffs: false,
             font_size: 8.0,
             github_token: None,
+            since: None,
+            until: None,
+            activity: crate::types::ActivityFilter::All,
+            events: 30,
         }
     }
 

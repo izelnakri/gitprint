@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::types::PaperSize;
+use crate::types::{ActivityFilter, PaperSize};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -73,14 +73,6 @@ pub struct Args {
     pub list_themes: bool,
 
     // ── User-report flags (only meaningful with -u/--user) ─────────────────────
-    /// Number of top-starred repos to include in the user report [default: 5]
-    #[arg(long, default_value_t = 5)]
-    pub top_starred: usize,
-
-    /// Number of most-recently-active repos to include in the user report [default: 5]
-    #[arg(long, default_value_t = 5)]
-    pub last_repos: usize,
-
     /// Number of most-recently-pushed repos to include in the user report [default: 5]
     #[arg(long, default_value_t = 5)]
     pub last_committed: usize,
@@ -92,6 +84,34 @@ pub struct Args {
     /// Skip commit diff rendering in the user report (faster)
     #[arg(long)]
     pub no_diffs: bool,
+
+    /// Show events from this date forward [default: no lower bound; GitHub keeps ≤ 90 days]
+    ///
+    /// Accepted formats:
+    ///   Machine-readable  2024-01-15  or  2024-01-15T00:00:00Z
+    ///   Human-readable    today · yesterday · 30 days ago · 2 weeks ago · 1 month ago
+    #[arg(long, value_name = "DATE")]
+    pub since: Option<String>,
+
+    /// Show events up to and including this date [default: no upper bound]
+    ///
+    /// Same formats as --since.
+    #[arg(long, value_name = "DATE")]
+    pub until: Option<String>,
+
+    /// Event types to include in the activity feed [default: all]
+    ///
+    /// all     — every public event (pushes, PRs, issues, stars, forks, …)
+    /// commits — push events only
+    #[arg(long, value_enum, default_value_t = ActivityFilter::All)]
+    pub activity: ActivityFilter,
+
+    /// Maximum events shown in the activity feed [default: 30]
+    ///
+    /// Fetches up to 100 events from GitHub and applies --since/--until/--activity
+    /// filters before counting toward this limit.
+    #[arg(long, default_value_t = 30)]
+    pub events: usize,
 }
 
 fn after_help_text() -> &'static str {
@@ -172,26 +192,49 @@ mod tests {
     #[test]
     fn user_report_flags_defaults() {
         let args = Args::parse_from(["gitprint", "-u", "alice"]);
-        assert_eq!(args.top_starred, 5);
-        assert_eq!(args.last_repos, 5);
         assert_eq!(args.last_committed, 5);
         assert_eq!(args.commits, 5);
         assert!(!args.no_diffs);
+        assert_eq!(args.events, 30);
+        assert!(matches!(args.activity, ActivityFilter::All));
+        assert!(args.since.is_none());
+        assert!(args.until.is_none());
     }
 
     #[test]
-    fn user_report_flags_custom() {
+    fn since_until_flags() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--since", "2024-01-01"]);
+        assert_eq!(args.since.as_deref(), Some("2024-01-01"));
         let args = Args::parse_from([
             "gitprint",
             "-u",
             "alice",
-            "--top-starred",
-            "10",
-            "--commits",
-            "3",
-            "--no-diffs",
+            "--since",
+            "30 days ago",
+            "--until",
+            "yesterday",
         ]);
-        assert_eq!(args.top_starred, 10);
+        assert_eq!(args.since.as_deref(), Some("30 days ago"));
+        assert_eq!(args.until.as_deref(), Some("yesterday"));
+    }
+
+    #[test]
+    fn activity_flag() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--activity", "commits"]);
+        assert!(matches!(args.activity, ActivityFilter::Commits));
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--activity", "all"]);
+        assert!(matches!(args.activity, ActivityFilter::All));
+    }
+
+    #[test]
+    fn events_flag() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--events", "50"]);
+        assert_eq!(args.events, 50);
+    }
+
+    #[test]
+    fn user_report_flags_custom() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--commits", "3", "--no-diffs"]);
         assert_eq!(args.commits, 3);
         assert!(args.no_diffs);
     }

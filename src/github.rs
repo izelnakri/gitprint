@@ -206,6 +206,64 @@ pub async fn get_user_events(
         .with_context(|| format!("fetching events for '{username}'"))
 }
 
+/// Response envelope for the commits search endpoint.
+#[derive(Deserialize)]
+struct CommitSearchResponse {
+    items: Vec<CommitSearchItem>,
+}
+
+#[derive(Deserialize)]
+struct CommitSearchItem {
+    sha: String,
+    repository: CommitSearchRepo,
+    commit: CommitSearchMeta,
+}
+
+#[derive(Deserialize)]
+struct CommitSearchRepo {
+    full_name: String,
+}
+
+#[derive(Deserialize)]
+struct CommitSearchMeta {
+    message: String,
+}
+
+/// Search for the `limit` most recent public commits authored by `username` across all repos.
+///
+/// Uses `GET /search/commits?q=author:{username}` (stable since GitHub API v3 2022+).
+/// Returns `(owner/repo, sha, first-line-of-message)` tuples, newest first.
+/// Returns an empty Vec on error so the caller can degrade gracefully.
+pub async fn search_user_commits(
+    username: &str,
+    limit: usize,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    let client = build_client()?;
+    let per_page = limit.min(100);
+    let url = format!(
+        "{API_BASE}/search/commits?q=author:{username}&sort=committer-date&order=desc&per_page={per_page}"
+    );
+    get_json::<CommitSearchResponse>(&client, &url, token)
+        .await
+        .map(|r| {
+            r.items
+                .into_iter()
+                .map(|item| {
+                    let msg = item
+                        .commit
+                        .message
+                        .lines()
+                        .next()
+                        .unwrap_or(&item.commit.message)
+                        .to_string();
+                    (item.repository.full_name, item.sha, msg)
+                })
+                .collect()
+        })
+        .with_context(|| format!("searching commits by '{username}'"))
+}
+
 /// Fetch a single commit with its file patches.
 pub async fn get_commit_detail(
     owner_repo: &str,

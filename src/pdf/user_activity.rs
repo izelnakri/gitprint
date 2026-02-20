@@ -1,4 +1,4 @@
-use printpdf::{Color, Pt, Rgb};
+use printpdf::{Actions, Color, Pt, Rgb};
 
 use super::layout::{PageBuilder, Span};
 use crate::github::GitHubEvent;
@@ -6,7 +6,7 @@ use crate::github::GitHubEvent;
 pub fn render(
     builder: &mut PageBuilder,
     events: &[GitHubEvent],
-    commit_msgs: &std::collections::HashMap<String, Vec<String>>,
+    commit_msgs: &std::collections::HashMap<String, String>,
 ) {
     if events.is_empty() {
         return;
@@ -44,20 +44,16 @@ pub fn render(
         let description = describe_event(event);
 
         // Enrich push events that have no commit info in the payload (force push /
-        // rebase). Fall back to commit messages fetched from the GitHub commit API.
+        // rebase). Look up this event's HEAD SHA to get its specific commit message.
         let (main, detail) = if event.kind == "PushEvent" && description.detail.is_empty() {
-            if let Some(msgs) = commit_msgs.get(&event.repo.name) {
-                let count = msgs.len();
-                let label = if count == 1 { "commit" } else { "commits" };
+            let sha = event.payload["head"].as_str().unwrap_or("");
+            if let Some(msg) = commit_msgs.get(sha) {
                 let branch = event.payload["ref"]
                     .as_str()
                     .unwrap_or("")
                     .trim_start_matches("refs/heads/");
-                let enriched_main =
-                    format!("Pushed {count} {label} to {} ({branch})", event.repo.name);
-                let enriched_detail: Vec<String> =
-                    msgs.iter().take(5).map(|m| format!("  {m}")).collect();
-                (enriched_main, enriched_detail)
+                let enriched_main = format!("Pushed to {} ({branch})", event.repo.name);
+                (enriched_main, vec![format!("  {msg}")])
             } else {
                 (description.main, description.detail)
             }
@@ -85,6 +81,9 @@ pub fn render(
                 color: black.clone(),
             },
         ]);
+        if let Some(url) = event_url(event) {
+            builder.add_link(builder.line_height(), Actions::Uri(url));
+        }
 
         // Detail lines (commit messages, PR diff stats, etc.)
         detail.iter().for_each(|detail| {
@@ -242,6 +241,34 @@ fn describe_event(event: &GitHubEvent) -> EventDescription {
     };
 
     EventDescription { main, detail }
+}
+
+/// Returns the most relevant clickable URL for a GitHub event, if one exists.
+fn event_url(event: &GitHubEvent) -> Option<String> {
+    let repo = &event.repo.name;
+    let p = &event.payload;
+    match event.kind.as_str() {
+        "PushEvent" => {
+            // Prefer a direct link to the HEAD commit; fall back to branch tree.
+            if let Some(sha) = p["head"].as_str() {
+                Some(format!("https://github.com/{repo}/commit/{sha}"))
+            } else {
+                p["ref"].as_str().map(|r| {
+                    let branch = r.trim_start_matches("refs/heads/");
+                    format!("https://github.com/{repo}/tree/{branch}")
+                })
+            }
+        }
+        "PullRequestEvent" => p["pull_request"]["html_url"].as_str().map(str::to_string),
+        "IssuesEvent" => p["issue"]["html_url"].as_str().map(str::to_string),
+        "IssueCommentEvent" => p["comment"]["html_url"].as_str().map(str::to_string),
+        "PullRequestReviewEvent" | "PullRequestReviewCommentEvent" => {
+            p["pull_request"]["html_url"].as_str().map(str::to_string)
+        }
+        "ForkEvent" => p["forkee"]["html_url"].as_str().map(str::to_string),
+        "ReleaseEvent" => p["release"]["html_url"].as_str().map(str::to_string),
+        _ => Some(format!("https://github.com/{repo}")),
+    }
 }
 
 fn capitalise(s: &str) -> String {

@@ -4,7 +4,7 @@ use tokio::task::JoinSet;
 
 use crate::github::{self, CommitDetail, GitHubEvent, GitHubRepo};
 use crate::pdf;
-use crate::types::UserReportConfig;
+use crate::types::{ActivityFilter, UserReportConfig};
 
 /// Runs the full user report pipeline and writes a PDF to `config.output_path`.
 pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
@@ -15,17 +15,50 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
     eprintln!("Fetching GitHub data for @{username}...");
 
     // ── Phase 1: parallel API fetches ─────────────────────────────────────────
-    let (user_res, starred_res, active_res, pushed_res, events_res) = tokio::join!(
+    // search_user_commits returns the N most recent commits across ALL public repos,
+    // regardless of push type (force push, rebase, etc.). It drives both the commit
+    // diffs section and the per-SHA message enrichment in the activity/repos renderers.
+    let (user_res, starred_res, active_res, pushed_res, events_res, search_commits_res) = tokio::join!(
         github::get_user(username, token),
-        github::get_user_starred_repos(username, config.top_starred, token),
-        github::get_user_repos(username, "updated", config.last_repos, token),
+        github::get_user_starred_repos(username, 5, token),
+        github::get_user_repos(username, "updated", 5, token),
         github::get_user_repos(username, "pushed", config.last_committed, token),
-        github::get_user_events(username, 30, token),
+        // Fetch up to 100 events (GitHub API max per page) so date/activity
+        // filters have the most events to work with before the display limit is applied.
+        github::get_user_events(username, 100, token),
+        // Skip the search if diffs are disabled or not requested.
+        async {
+            if config.no_diffs || config.commits == 0 {
+                Ok(vec![])
+            } else {
+                github::search_user_commits(username, config.commits, token).await
+            }
+        },
     );
 
     let user = user_res?;
     let starred_repos = starred_res.unwrap_or_default();
-    let events = coalesce_push_events(events_res.unwrap_or_default());
+
+    // Coalesce duplicate push events first, then apply user-specified filters.
+    let events = {
+        let raw = coalesce_push_events(events_res.unwrap_or_default());
+
+        // Date range filter — ISO 8601 strings sort lexicographically, so simple
+        // string comparison is correct for YYYY-MM-DD prefixes.
+        let date_filtered = raw.into_iter().filter(|e| {
+            let date = e.created_at.get(..10).unwrap_or(&e.created_at);
+            config.since.as_deref().is_none_or(|s| date >= s)
+                && config.until.as_deref().is_none_or(|u| date <= u)
+        });
+
+        // Activity type filter.
+        match config.activity {
+            ActivityFilter::All => date_filtered.collect::<Vec<_>>(),
+            ActivityFilter::Commits => date_filtered
+                .filter(|e| e.kind == "PushEvent")
+                .collect::<Vec<_>>(),
+        }
+    };
 
     // Build repo-name sets from the user's own event feed — these are definitively
     // the user's own actions, not collaborator or bot activity.
@@ -71,10 +104,20 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
     let total_stars: u64 = starred_repos.iter().map(|r| r.stargazers_count).sum();
 
     // ── Phase 2: fetch commit details in parallel ──────────────────────────────
-    // Store (repo_name, CommitDetail) so we can build a per-repo message lookup
-    // for enriching the activity and repos sections.
+    // SHA → first-line-of-message lookup built from the search API results.
+    // Keyed by commit SHA so each push event's HEAD can be enriched individually,
+    // preventing the same messages from appearing across multiple push events.
+    let search_commits = search_commits_res.unwrap_or_default();
+    let commit_msgs: std::collections::HashMap<String, String> = search_commits
+        .iter()
+        .map(|(_, sha, msg)| (sha.clone(), msg.clone()))
+        .collect();
+
     let commit_details: Vec<(String, CommitDetail)> = if !config.no_diffs && config.commits > 0 {
-        let shas = extract_push_shas(&events, config.commits);
+        let shas: Vec<(String, String)> = search_commits
+            .into_iter()
+            .map(|(repo, sha, _)| (repo, sha))
+            .collect();
         eprintln!("Fetching {} commit diff(s)...", shas.len());
         let mut set: JoinSet<anyhow::Result<(String, CommitDetail)>> = JoinSet::new();
         shas.into_iter().for_each(|(repo, sha)| {
@@ -94,23 +137,6 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         vec![]
     };
 
-    // Per-repo commit message lookup: used by activity + repos renderers to show
-    // commit messages even when the Events API omits them (force push / rebase).
-    let commit_msgs: std::collections::HashMap<String, Vec<String>> =
-        commit_details
-            .iter()
-            .fold(std::collections::HashMap::new(), |mut map, (repo, cd)| {
-                map.entry(repo.clone()).or_default().push(
-                    cd.commit
-                        .message
-                        .lines()
-                        .next()
-                        .unwrap_or(&cd.commit.message)
-                        .to_string(),
-                );
-                map
-            });
-
     // ── Phase 3: PDF assembly (sequential) ────────────────────────────────────
     eprintln!("Rendering PDF...");
     let mut doc = printpdf::PdfDocument::new(&format!("{username} — GitHub User Report"));
@@ -120,15 +146,16 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
     // Cover page
     pdf::user_cover::render(&mut builder, &user, total_stars);
 
-    // Activity feed
-    pdf::user_activity::render(&mut builder, &events, &commit_msgs);
+    // Activity feed — capped to the requested display limit.
+    let display_events = &events[..config.events.min(events.len())];
+    pdf::user_activity::render(&mut builder, display_events, &commit_msgs);
 
     // Repository sections — pass events + fetched commit msgs for rich context
     render_repos_section(
         &mut builder,
         "Top Starred Repositories",
         &starred_repos,
-        config.top_starred,
+        5,
         &events,
         &commit_msgs,
     );
@@ -136,7 +163,7 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         &mut builder,
         "Repos You Were Active In",
         &active_repos,
-        config.last_repos,
+        5,
         &events,
         &commit_msgs,
     );
@@ -151,12 +178,24 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
 
     // Commit diffs
     if !commit_details.is_empty() {
+        // Build SHA → branch from push events so each diff header can show the branch.
+        let sha_to_branch: std::collections::HashMap<&str, &str> = events
+            .iter()
+            .filter(|e| e.kind == "PushEvent")
+            .filter_map(|e| {
+                let sha = e.payload["head"].as_str()?;
+                let branch = e.payload["ref"].as_str()?.trim_start_matches("refs/heads/");
+                Some((sha, branch))
+            })
+            .collect();
+
         let bold = builder.font(true, false).clone();
         let black = printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None));
         builder.write_centered("Recent Commits", &bold, printpdf::Pt(16.0), black);
         builder.vertical_space(12.0);
-        commit_details.iter().for_each(|(_, detail)| {
-            pdf::diff::render_commit(&mut builder, detail, config.font_size as f32);
+        commit_details.iter().for_each(|(repo, detail)| {
+            let branch = sha_to_branch.get(detail.sha.as_str()).copied();
+            pdf::diff::render_commit(&mut builder, detail, repo, branch, config.font_size as f32);
         });
     }
 
@@ -203,44 +242,13 @@ fn coalesce_push_events(events: Vec<GitHubEvent>) -> Vec<GitHubEvent> {
         .collect()
 }
 
-/// Extract up to `limit` (repo, sha) pairs from PushEvents, newest first.
-///
-/// GitHub omits individual commit entries for force-pushes and rebases but always
-/// includes `payload.head` (the resulting HEAD SHA). We fall back to that so we can
-/// still fetch the commit message for those events.
-fn extract_push_shas(events: &[GitHubEvent], limit: usize) -> Vec<(String, String)> {
-    events
-        .iter()
-        .filter(|e| e.kind == "PushEvent")
-        .flat_map(|e| {
-            let repo = e.repo.name.clone();
-            let from_commits: Vec<_> = e.payload["commits"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|c| c["sha"].as_str().map(str::to_string))
-                .map(|sha| (repo.clone(), sha))
-                .collect();
-            if from_commits.is_empty() {
-                e.payload["head"]
-                    .as_str()
-                    .map(|sha| vec![(repo, sha.to_string())])
-                    .unwrap_or_default()
-            } else {
-                from_commits
-            }
-        })
-        .take(limit)
-        .collect()
-}
-
 fn render_repos_section(
     builder: &mut crate::pdf::layout::PageBuilder,
     title: &str,
     repos: &[GitHubRepo],
     limit: usize,
     events: &[GitHubEvent],
-    commit_msgs: &std::collections::HashMap<String, Vec<String>>,
+    commit_msgs: &std::collections::HashMap<String, String>,
 ) {
     if limit == 0 || repos.is_empty() {
         return;
@@ -272,73 +280,33 @@ mod tests {
     use super::*;
     use crate::github::EventRepo;
 
-    fn make_push_event(repo: &str, shas: &[&str]) -> GitHubEvent {
-        let commits: Vec<serde_json::Value> = shas
-            .iter()
-            .map(|s| serde_json::json!({ "sha": s }))
-            .collect();
+    fn make_push_event(repo: &str) -> GitHubEvent {
         GitHubEvent {
             kind: "PushEvent".to_string(),
             repo: EventRepo {
                 name: repo.to_string(),
             },
-            payload: serde_json::json!({ "ref": "refs/heads/main", "commits": commits }),
+            payload: serde_json::json!({ "ref": "refs/heads/main", "commits": [] }),
             created_at: "2024-03-01T12:00:00Z".to_string(),
         }
     }
 
     #[test]
-    fn extract_push_shas_respects_limit() {
-        let events = vec![
-            make_push_event("alice/a", &["sha1", "sha2", "sha3"]),
-            make_push_event("alice/b", &["sha4", "sha5"]),
-        ];
-        let shas = extract_push_shas(&events, 4);
-        assert_eq!(shas.len(), 4);
-        assert_eq!(shas[0], ("alice/a".to_string(), "sha1".to_string()));
-        assert_eq!(shas[3], ("alice/b".to_string(), "sha4".to_string()));
-    }
-
-    #[test]
-    fn extract_push_shas_skips_non_push() {
-        let events = vec![
-            GitHubEvent {
-                kind: "WatchEvent".to_string(),
-                repo: EventRepo {
-                    name: "alice/a".to_string(),
-                },
-                payload: serde_json::json!({}),
-                created_at: "2024-03-01T00:00:00Z".to_string(),
-            },
-            make_push_event("alice/b", &["sha1"]),
-        ];
-        let shas = extract_push_shas(&events, 10);
-        assert_eq!(shas.len(), 1);
-        assert_eq!(shas[0].0, "alice/b");
-    }
-
-    #[test]
-    fn extract_push_shas_empty_events() {
-        assert!(extract_push_shas(&[], 5).is_empty());
-    }
-
-    #[test]
     fn coalesce_keeps_first_push_per_day_branch() {
         let events = vec![
-            make_push_event("alice/a", &["sha1"]),
-            make_push_event("alice/a", &["sha2"]),
-            make_push_event("alice/a", &["sha3"]),
+            make_push_event("alice/a"),
+            make_push_event("alice/a"),
+            make_push_event("alice/a"),
         ];
         let out = coalesce_push_events(events);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].payload["commits"][0]["sha"], "sha1");
     }
 
     #[test]
     fn coalesce_keeps_different_branches_separate() {
-        let mut ev2 = make_push_event("alice/a", &["sha2"]);
+        let mut ev2 = make_push_event("alice/a");
         ev2.payload["ref"] = serde_json::json!("refs/heads/dev");
-        let events = vec![make_push_event("alice/a", &["sha1"]), ev2];
+        let events = vec![make_push_event("alice/a"), ev2];
         assert_eq!(coalesce_push_events(events).len(), 2);
     }
 
@@ -353,8 +321,8 @@ mod tests {
                 payload: serde_json::json!({}),
                 created_at: "2024-03-01T00:00:00Z".to_string(),
             },
-            make_push_event("alice/a", &["sha1"]),
-            make_push_event("alice/a", &["sha2"]),
+            make_push_event("alice/a"),
+            make_push_event("alice/a"),
         ];
         let out = coalesce_push_events(events);
         assert_eq!(out.len(), 2);
