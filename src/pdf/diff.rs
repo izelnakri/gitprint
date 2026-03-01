@@ -3,6 +3,22 @@ use printpdf::{Actions, Color, Pt, Rgb};
 use super::layout::{PageBuilder, Span};
 use crate::github::CommitDetail;
 
+// ── Color palette ──────────────────────────────────────────────────────────────
+// Green/red chosen to be distinguishable for common colorblindness types:
+//   • Protanopes/deuteranopes see the green as teal-cyan and the red as orange-amber,
+//     which remain clearly distinct from each other and from context-line gray.
+//   • Both convert to clearly different gray values for black-only printing.
+//   • Green is darker (HSL ~150°, 100%, 38%) for better legibility at small sizes.
+fn neon_green() -> Color {
+    Color::Rgb(Rgb::new(0.0, 0.76, 0.38, None)) // #00C261 — dark electric jade
+}
+fn neon_red() -> Color {
+    Color::Rgb(Rgb::new(0.94, 0.20, 0.20, None)) // #F03333 — deep neon red
+}
+fn hunk_blue() -> Color {
+    Color::Rgb(Rgb::new(0.34, 0.60, 0.96, None)) // #5799F5 — electric blue
+}
+
 pub fn render_commit(
     builder: &mut PageBuilder,
     detail: &CommitDetail,
@@ -14,11 +30,9 @@ pub fn render_commit(
     let regular = builder.font(false, false).clone();
     let italic = builder.font(false, true).clone();
     let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
-    let gray = Color::Rgb(Rgb::new(0.47, 0.47, 0.47, None));
-    let dark_gray = Color::Rgb(Rgb::new(0.3, 0.3, 0.3, None));
-    let green = Color::Rgb(Rgb::new(0.1, 0.5, 0.1, None));
-    let red = Color::Rgb(Rgb::new(0.7, 0.1, 0.1, None));
-    let blue_gray = Color::Rgb(Rgb::new(0.3, 0.3, 0.6, None));
+    let gray = Color::Rgb(Rgb::new(0.50, 0.50, 0.50, None));
+    let dark_gray = Color::Rgb(Rgb::new(0.28, 0.28, 0.28, None));
+    let rule_gray = Color::Rgb(Rgb::new(0.78, 0.78, 0.78, None));
 
     let sha_short = detail.sha.get(..7).unwrap_or(&detail.sha);
     let author = &detail.commit.author.name;
@@ -40,10 +54,14 @@ pub fn render_commit(
             (add + f.additions, del + f.deletions)
         });
 
-    builder.ensure_space(builder.line_height() * 4.0);
+    builder.ensure_space(builder.line_height() * 5.0);
 
-    // ── Commit header: sha · repo (branch) · author · date · ±stats ─────────
-    let mut header_spans = vec![
+    // ── Thin separator rule before each commit ─────────────────────────────────
+    builder.draw_horizontal_rule(rule_gray.clone(), 0.4);
+    builder.vertical_space(7.0);
+
+    // ── Line 1: sha · message — links to the commit page ──────────────────────
+    builder.write_line(&[
         Span {
             text: format!("{sha_short}  "),
             font_id: bold.clone(),
@@ -51,59 +69,75 @@ pub fn render_commit(
             color: dark_gray.clone(),
         },
         Span {
-            text: format!("{repo}  "),
-            font_id: regular.clone(),
+            text: message_first_line.to_string(),
+            font_id: bold.clone(),
             size: Pt(font_size),
-            color: dark_gray.clone(),
+            color: black.clone(),
         },
-    ];
+    ]);
+    builder.add_link(builder.line_height(), Actions::Uri(detail.html_url.clone()));
+
+    // ── Line 2: repo (branch) · author · date · ±stats — links to repo/branch ─
+    let meta_size = Pt(font_size - 1.0);
+    let mut meta_spans = vec![Span {
+        text: format!("  {repo}  "),
+        font_id: regular.clone(),
+        size: meta_size,
+        color: dark_gray.clone(),
+    }];
     if let Some(b) = branch {
-        header_spans.push(Span {
+        meta_spans.push(Span {
             text: format!("({b})  "),
             font_id: italic.clone(),
-            size: Pt(font_size),
+            size: meta_size,
             color: gray.clone(),
         });
     }
-    header_spans.extend([
+    meta_spans.extend([
         Span {
             text: format!("{author}  "),
             font_id: regular.clone(),
-            size: Pt(font_size),
-            color: black.clone(),
+            size: meta_size,
+            color: dark_gray.clone(),
         },
         Span {
             text: format!("{date}  "),
             font_id: regular.clone(),
-            size: Pt(font_size),
+            size: meta_size,
             color: gray.clone(),
         },
         Span {
-            text: format!("+{total_additions} -{total_deletions}"),
+            text: format!("+{total_additions}"),
+            font_id: bold.clone(),
+            size: meta_size,
+            color: neon_green(),
+        },
+        Span {
+            text: "  ".to_string(),
             font_id: regular.clone(),
-            size: Pt(font_size),
-            color: dark_gray.clone(),
+            size: meta_size,
+            color: gray.clone(),
+        },
+        Span {
+            text: format!("-{total_deletions}"),
+            font_id: bold.clone(),
+            size: meta_size,
+            color: neon_red(),
         },
     ]);
-    builder.write_line(&header_spans);
-    builder.add_link(builder.line_height(), Actions::Uri(detail.html_url.clone()));
+    builder.write_line(&meta_spans);
+    let meta_url = branch
+        .map(|b| format!("https://github.com/{repo}/tree/{b}"))
+        .unwrap_or_else(|| format!("https://github.com/{repo}"));
+    builder.add_link(builder.line_height(), Actions::Uri(meta_url));
 
-    // Commit message — also links to the commit page.
-    builder.write_line(&[Span {
-        text: format!("  {message_first_line}"),
-        font_id: bold.clone(),
-        size: Pt(font_size),
-        color: black.clone(),
-    }]);
-    builder.add_link(builder.line_height(), Actions::Uri(detail.html_url.clone()));
-
-    builder.vertical_space(4.0);
+    builder.vertical_space(5.0);
 
     // ── Per-file diffs ─────────────────────────────────────────────────────────
     detail.files.iter().for_each(|file| {
         builder.ensure_space(builder.line_height() * 3.0);
 
-        // File header line — links to the file at this commit on GitHub.
+        // File header: filename + stats, links to the file at this commit on GitHub.
         builder.write_line(&[
             Span {
                 text: format!("  {} ", file.filename),
@@ -112,10 +146,22 @@ pub fn render_commit(
                 color: black.clone(),
             },
             Span {
-                text: format!("+{} -{}", file.additions, file.deletions),
+                text: format!("+{}", file.additions),
                 font_id: regular.clone(),
                 size: Pt(font_size - 0.5),
-                color: dark_gray.clone(),
+                color: neon_green(),
+            },
+            Span {
+                text: " ".to_string(),
+                font_id: regular.clone(),
+                size: Pt(font_size - 0.5),
+                color: gray.clone(),
+            },
+            Span {
+                text: format!("-{}", file.deletions),
+                font_id: regular.clone(),
+                size: Pt(font_size - 0.5),
+                color: neon_red(),
             },
         ]);
         let file_url = format!(
@@ -135,21 +181,20 @@ pub fn render_commit(
             }
             Some(patch) => {
                 patch.lines().for_each(|line| {
-                    let (prefix, color) = if line.starts_with('+') {
-                        ("+", green.clone())
+                    let (marker, color) = if line.starts_with('+') {
+                        ("+", neon_green())
                     } else if line.starts_with('-') {
-                        ("-", red.clone())
+                        ("-", neon_red())
                     } else if line.starts_with("@@") {
-                        ("@", blue_gray.clone())
+                        ("@", hunk_blue())
                     } else {
                         (" ", dark_gray.clone())
                     };
-                    // Indent all diff lines by 4 spaces; strip the diff prefix char and
-                    // replace it with a padded marker so columns stay aligned.
                     let body = if line.starts_with("@@") {
                         line.to_string()
                     } else {
-                        format!("{prefix} {}", line.get(1..).unwrap_or(line))
+                        // Strip the diff prefix char; replace with padded marker.
+                        format!("{marker} {}", line.get(1..).unwrap_or(line))
                     };
                     builder.write_line(&[Span {
                         text: format!("    {body}"),
@@ -164,7 +209,7 @@ pub fn render_commit(
         builder.vertical_space(3.0);
     });
 
-    builder.vertical_space(8.0);
+    builder.vertical_space(6.0);
 }
 
 #[cfg(test)]

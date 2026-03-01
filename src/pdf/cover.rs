@@ -75,7 +75,6 @@ pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata, remote_url: Op
     let lh = builder.line_height();
 
     const TABLE_SIZE: f32 = 9.0;
-    const SEP_SIZE: f32 = 7.5;
 
     // Use explicit remote_url if provided; otherwise fall back to the one detected
     // from git config so links work for local git repos without --remote.
@@ -113,17 +112,8 @@ pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata, remote_url: Op
     builder.vertical_space(32.0);
 
     // ── Metadata table ────────────────────────────────────────────────────────
-    let sep = separator_line(builder.usable_width_pt(), SEP_SIZE);
-
-    let sep_span = || Span {
-        text: sep.clone(),
-        font_id: regular.clone(),
-        size: Pt(SEP_SIZE),
-        color: gray.clone(),
-    };
-
-    builder.write_line(&[sep_span()]);
-    builder.vertical_space(4.0);
+    builder.draw_horizontal_rule(Color::Rgb(Rgb::new(0.72, 0.72, 0.72, None)), 0.5);
+    builder.vertical_space(8.0);
 
     // Rows: (label, value, optional URL). Message links to the same commit as Commit.
     [
@@ -171,7 +161,7 @@ pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata, remote_url: Op
     });
 
     builder.vertical_space(4.0);
-    builder.write_line(&[sep_span()]);
+    builder.draw_horizontal_rule(Color::Rgb(Rgb::new(0.72, 0.72, 0.72, None)), 0.5);
 
     // ── Footer (pushed to the bottom of the page) ─────────────────────────────
     let version = env!("CARGO_PKG_VERSION");

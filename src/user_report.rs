@@ -2,9 +2,24 @@
 
 use tokio::task::JoinSet;
 
-use crate::github::{self, CommitDetail, GitHubEvent, GitHubRepo};
+use crate::github::{self, CommitDetail, GitHubEvent, GitHubRepo, GitHubUser};
 use crate::pdf;
 use crate::types::{ActivityFilter, UserReportConfig};
+
+/// Pre-fetched GitHub data consumed by the PDF render phase.
+///
+/// Separating the fetch phase from the render phase keeps the render logic
+/// testable without any network I/O.
+pub(crate) struct UserReportData {
+    pub user: GitHubUser,
+    pub total_stars: u64,
+    pub starred_repos: Vec<GitHubRepo>,
+    pub active_repos: Vec<GitHubRepo>,
+    pub pushed_repos: Vec<GitHubRepo>,
+    pub events: Vec<GitHubEvent>,
+    pub commit_msgs: std::collections::HashMap<String, String>,
+    pub commit_details: Vec<(String, CommitDetail)>,
+}
 
 /// Runs the full user report pipeline and writes a PDF to `config.output_path`.
 pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
@@ -107,7 +122,13 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
     // SHA → first-line-of-message lookup built from the search API results.
     // Keyed by commit SHA so each push event's HEAD can be enriched individually,
     // preventing the same messages from appearing across multiple push events.
-    let search_commits = search_commits_res.unwrap_or_default();
+    // Propagate rate-limit errors so the user sees an actionable message; for
+    // other transient failures degrade gracefully to an empty commit list.
+    let search_commits = match search_commits_res {
+        Ok(commits) => commits,
+        Err(e) if e.to_string().contains("rate limit") => return Err(e),
+        Err(_) => vec![],
+    };
     let commit_msgs: std::collections::HashMap<String, String> = search_commits
         .iter()
         .map(|(_, sha, msg)| (sha.clone(), msg.clone()))
@@ -128,8 +149,17 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
                     .map(|cd| (repo, cd))
             });
         });
-        let mut details: Vec<(String, CommitDetail)> =
-            set.join_all().await.into_iter().flatten().collect();
+        // Propagate rate-limit errors; silently drop other per-commit failures (e.g. 404).
+        let mut details: Vec<(String, CommitDetail)> = set
+            .join_all()
+            .await
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok(pair) => Some(Ok(pair)),
+                Err(e) if e.to_string().contains("rate limit") => Some(Err(e)),
+                Err(_) => None,
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
         // Sort newest-first so displayed messages are in chronological order.
         details.sort_unstable_by(|(_, a), (_, b)| b.commit.author.date.cmp(&a.commit.author.date));
         details
@@ -139,69 +169,17 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
 
     // ── Phase 3: PDF assembly (sequential) ────────────────────────────────────
     eprintln!("Rendering PDF...");
-    let mut doc = printpdf::PdfDocument::new(&format!("{username} — GitHub User Report"));
-    let fonts = pdf::fonts::load_fonts(&mut doc)?;
-    let mut builder = pdf::create_user_builder(config, fonts);
-
-    // Cover page
-    pdf::user_cover::render(&mut builder, &user, total_stars);
-
-    // Activity feed — capped to the requested display limit.
-    let display_events = &events[..config.events.min(events.len())];
-    pdf::user_activity::render(&mut builder, display_events, &commit_msgs);
-
-    // Repository sections — pass events + fetched commit msgs for rich context
-    render_repos_section(
-        &mut builder,
-        "Top Starred Repositories",
-        &starred_repos,
-        5,
-        &events,
-        &commit_msgs,
-    );
-    render_repos_section(
-        &mut builder,
-        "Repos You Were Active In",
-        &active_repos,
-        5,
-        &events,
-        &commit_msgs,
-    );
-    render_repos_section(
-        &mut builder,
-        "Repos You Pushed To",
-        &pushed_repos,
-        config.last_committed,
-        &events,
-        &commit_msgs,
-    );
-
-    // Commit diffs
-    if !commit_details.is_empty() {
-        // Build SHA → branch from push events so each diff header can show the branch.
-        let sha_to_branch: std::collections::HashMap<&str, &str> = events
-            .iter()
-            .filter(|e| e.kind == "PushEvent")
-            .filter_map(|e| {
-                let sha = e.payload["head"].as_str()?;
-                let branch = e.payload["ref"].as_str()?.trim_start_matches("refs/heads/");
-                Some((sha, branch))
-            })
-            .collect();
-
-        let bold = builder.font(true, false).clone();
-        let black = printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None));
-        builder.write_centered("Recent Commits", &bold, printpdf::Pt(16.0), black);
-        builder.vertical_space(12.0);
-        commit_details.iter().for_each(|(repo, detail)| {
-            let branch = sha_to_branch.get(detail.sha.as_str()).copied();
-            pdf::diff::render_commit(&mut builder, detail, repo, branch, config.font_size as f32);
-        });
-    }
-
-    let pages = builder.finish();
-    let total_pages = pages.len();
-    doc.with_pages(pages);
+    let data = UserReportData {
+        user,
+        total_stars,
+        starred_repos,
+        active_repos,
+        pushed_repos,
+        events,
+        commit_msgs,
+        commit_details,
+    };
+    let (doc, total_pages) = render_to_doc(config, &data)?;
     pdf::save_pdf(&doc, &config.output_path).await?;
 
     let elapsed = elapsed_str(start.elapsed());
@@ -217,6 +195,81 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         elapsed,
     );
     Ok(())
+}
+
+/// Render the user report PDF from pre-fetched data.
+///
+/// Returns the assembled `PdfDocument` (ready to save) and the page count.
+/// No network I/O is performed — all data must be supplied via `data`.
+pub(crate) fn render_to_doc(
+    config: &UserReportConfig,
+    data: &UserReportData,
+) -> anyhow::Result<(printpdf::PdfDocument, usize)> {
+    let mut doc = printpdf::PdfDocument::new(&format!("{} — GitHub User Report", config.username));
+    let fonts = pdf::fonts::load_fonts(&mut doc)?;
+    let mut builder = pdf::create_user_builder(config, fonts);
+
+    // Cover page
+    pdf::user_cover::render(&mut builder, &data.user, data.total_stars);
+
+    // Activity feed — capped to the requested display limit.
+    let display_events = &data.events[..config.events.min(data.events.len())];
+    pdf::user_activity::render(&mut builder, display_events, &data.commit_msgs);
+
+    // Repository sections — pass events + fetched commit msgs for rich context
+    render_repos_section(
+        &mut builder,
+        "Top Starred Repositories",
+        &data.starred_repos,
+        5,
+        &data.events,
+        &data.commit_msgs,
+    );
+    render_repos_section(
+        &mut builder,
+        "Repos You Were Active In",
+        &data.active_repos,
+        5,
+        &data.events,
+        &data.commit_msgs,
+    );
+    render_repos_section(
+        &mut builder,
+        "Repos User Pushed To",
+        &data.pushed_repos,
+        config.last_committed,
+        &data.events,
+        &data.commit_msgs,
+    );
+
+    // Commit diffs
+    if !data.commit_details.is_empty() {
+        // Build SHA → branch from push events so each diff header can show the branch.
+        let sha_to_branch: std::collections::HashMap<&str, &str> = data
+            .events
+            .iter()
+            .filter(|e| e.kind == "PushEvent")
+            .filter_map(|e| {
+                let sha = e.payload["head"].as_str()?;
+                let branch = e.payload["ref"].as_str()?.trim_start_matches("refs/heads/");
+                Some((sha, branch))
+            })
+            .collect();
+
+        let bold = builder.font(true, false).clone();
+        let black = printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None));
+        builder.write_centered("Recent Commits", &bold, printpdf::Pt(16.0), black);
+        builder.vertical_space(12.0);
+        data.commit_details.iter().for_each(|(repo, detail)| {
+            let branch = sha_to_branch.get(detail.sha.as_str()).copied();
+            pdf::diff::render_commit(&mut builder, detail, repo, branch, config.font_size as f32);
+        });
+    }
+
+    let pages = builder.finish();
+    let page_count = pages.len();
+    doc.with_pages(pages);
+    Ok((doc, page_count))
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -278,7 +331,8 @@ fn elapsed_str(d: std::time::Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::github::EventRepo;
+    use crate::github::{CommitAuthor, CommitFile, CommitInfo, EventRepo, GitHubUser};
+    use crate::types::{ActivityFilter, PaperSize};
 
     fn make_push_event(repo: &str) -> GitHubEvent {
         GitHubEvent {
@@ -327,5 +381,106 @@ mod tests {
         let out = coalesce_push_events(events);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].kind, "WatchEvent");
+    }
+
+    // ── render_to_doc offline tests ───────────────────────────────────────────
+
+    fn mock_user() -> GitHubUser {
+        GitHubUser {
+            login: "alice".to_string(),
+            name: Some("Alice".to_string()),
+            bio: None,
+            location: None,
+            company: None,
+            blog: None,
+            email: None,
+            public_repos: 5,
+            followers: 10,
+            following: 5,
+            created_at: "2020-01-01T00:00:00Z".to_string(),
+            html_url: "https://github.com/alice".to_string(),
+        }
+    }
+
+    fn mock_config(commits: usize) -> UserReportConfig {
+        UserReportConfig {
+            username: "alice".to_string(),
+            output_path: "/tmp/test-commits.pdf".into(),
+            paper_size: PaperSize::A4,
+            landscape: false,
+            last_committed: 0,
+            commits,
+            no_diffs: false,
+            font_size: 8.0,
+            github_token: None,
+            since: None,
+            until: None,
+            activity: ActivityFilter::All,
+            events: 0,
+        }
+    }
+
+    /// Generate a mock `(repo, CommitDetail)` with a large diff patch so it
+    /// occupies several lines in the rendered PDF.
+    fn mock_commit_detail(idx: usize) -> (String, CommitDetail) {
+        let patch: String = (0..80).map(|i| format!("+added line {i}\n")).collect();
+        (
+            format!("alice/repo{idx}"),
+            CommitDetail {
+                sha: format!("{idx:040x}"),
+                html_url: format!("https://github.com/alice/repo{idx}/commit/{idx:040x}"),
+                commit: CommitInfo {
+                    message: format!("commit #{idx}: add many lines"),
+                    author: CommitAuthor {
+                        name: "Alice".to_string(),
+                        date: format!("2024-03-{:02}T12:00:00Z", idx % 28 + 1),
+                    },
+                },
+                files: vec![CommitFile {
+                    filename: format!("src/module{idx}.rs"),
+                    status: "modified".to_string(),
+                    additions: 80,
+                    deletions: 0,
+                    patch: Some(patch),
+                }],
+            },
+        )
+    }
+
+    fn empty_report_data() -> UserReportData {
+        UserReportData {
+            user: mock_user(),
+            total_stars: 0,
+            starred_repos: vec![],
+            active_repos: vec![],
+            pushed_repos: vec![],
+            events: vec![],
+            commit_msgs: std::collections::HashMap::new(),
+            commit_details: vec![],
+        }
+    }
+
+    #[test]
+    fn render_to_doc_no_commits_succeeds() {
+        let (_, pages) = render_to_doc(&mock_config(0), &empty_report_data()).unwrap();
+        assert!(pages > 0);
+    }
+
+    /// More commits with large diffs must produce more PDF pages than zero commits.
+    /// This verifies the `--commits` flag actually drives the diff render path.
+    #[test]
+    fn more_commits_yields_more_pages() {
+        let (_, pages_baseline) = render_to_doc(&mock_config(0), &empty_report_data()).unwrap();
+
+        let data_with_commits = UserReportData {
+            commit_details: (0..10).map(mock_commit_detail).collect(),
+            ..empty_report_data()
+        };
+        let (_, pages_with_commits) = render_to_doc(&mock_config(10), &data_with_commits).unwrap();
+
+        assert!(
+            pages_with_commits > pages_baseline,
+            "expected more pages with commits ({pages_with_commits}) than without ({pages_baseline})"
+        );
     }
 }

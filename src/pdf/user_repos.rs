@@ -38,19 +38,30 @@ pub fn render(
     let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
     let gray = Color::Rgb(Rgb::new(0.47, 0.47, 0.47, None));
     let dark_gray = Color::Rgb(Rgb::new(0.25, 0.25, 0.25, None));
+    let gold = Color::Rgb(Rgb::new(0.90, 0.72, 0.10, None));
+    let rule_gray = Color::Rgb(Rgb::new(0.85, 0.85, 0.85, None));
 
     builder.ensure_space(builder.line_height() * 3.0);
     builder.write_centered(title, &bold, Pt(14.0), black.clone());
-    builder.vertical_space(10.0);
+    builder.vertical_space(8.0);
+    builder.draw_horizontal_rule(rule_gray.clone(), 0.5);
+    builder.vertical_space(8.0);
 
-    repos.iter().for_each(|repo| {
+    repos.iter().enumerate().for_each(|(idx, repo)| {
+        // Thin separator between repo entries (not before the first one).
+        if idx > 0 {
+            builder.vertical_space(2.0);
+            builder.draw_horizontal_rule(rule_gray.clone(), 0.3);
+            builder.vertical_space(8.0);
+        }
+
         builder.ensure_space(builder.line_height() * 5.0);
 
         // ── Row 1: name (left) + stats (right) ─────────────────────────────
         let fork_tag = if repo.fork { " [fork]" } else { "" };
         let lang = repo.language.as_deref().unwrap_or("—");
         let stats = format!(
-            "{} stars  {} forks  {} issues  {}",
+            "\u{25C6} {} \u{00B7} \u{25B7} {} \u{00B7} ! {} \u{00B7} {}",
             repo.stargazers_count, repo.forks_count, repo.open_issues_count, lang
         );
         builder.write_line_justified(
@@ -64,7 +75,7 @@ pub fn render(
                 text: stats,
                 font_id: regular.clone(),
                 size: Pt(8.0),
-                color: dark_gray.clone(),
+                color: gold.clone(),
             }],
         );
         builder.add_link(builder.line_height(), Actions::Uri(repo.html_url.clone()));
@@ -151,7 +162,7 @@ pub fn render(
                     size: Pt(7.5),
                     color: dark_gray.clone(),
                 }]);
-                builder.add_link(builder.line_height(), Actions::Uri(push_url));
+                builder.add_link(builder.line_height(), Actions::Uri(push_url.clone()));
                 commits.iter().for_each(|msg| {
                     builder.write_line(&[Span {
                         text: format!("      {msg}"),
@@ -159,6 +170,7 @@ pub fn render(
                         size: Pt(7.5),
                         color: gray.clone(),
                     }]);
+                    builder.add_link(builder.line_height(), Actions::Uri(push_url.clone()));
                 });
             }
         } else if let Some(ev) = activity_ctx.get(repo.full_name.as_str()) {

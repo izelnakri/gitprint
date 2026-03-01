@@ -139,7 +139,7 @@ async fn main() {
         };
 
         if let Err(e) = gitprint::user_report::run(&config).await {
-            eprintln!("error: {e}");
+            eprintln!("error: {e:#}");
             std::process::exit(1);
         }
         return;

@@ -1,6 +1,6 @@
 use printpdf::{
-    Actions, BorderArray, Color, ColorArray, FontId, LinkAnnotation, Mm, Op, PdfFontHandle,
-    PdfPage, Pt, Rect, Rgb, TextItem, graphics::Point,
+    Actions, BorderArray, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation, Mm, Op,
+    PdfFontHandle, PdfPage, Pt, Rect, Rgb, TextItem, graphics::Point,
 };
 
 /// A styled text span within a line.
@@ -360,6 +360,39 @@ impl PageBuilder {
         self.y += self.line_height;
     }
 
+    /// Draw a full-width horizontal rule at the current `y` position and advance
+    /// `y` by `thickness_pt` so subsequent content clears the rule.
+    pub fn draw_horizontal_rule(&mut self, color: Color, thickness_pt: f32) {
+        self.flush_break();
+        let y = self.pdf_y();
+        let left = self.left_x();
+        let right = Pt(left.0 + self.usable_width_pt());
+        self.current_ops.extend([
+            Op::SaveGraphicsState,
+            Op::SetOutlineColor { col: color },
+            Op::SetOutlineThickness {
+                pt: Pt(thickness_pt),
+            },
+            Op::DrawLine {
+                line: Line {
+                    points: vec![
+                        LinePoint {
+                            p: Point { x: left, y },
+                            bezier: false,
+                        },
+                        LinePoint {
+                            p: Point { x: right, y },
+                            bezier: false,
+                        },
+                    ],
+                    is_closed: false,
+                },
+            },
+            Op::RestoreGraphicsState,
+        ]);
+        self.y += thickness_pt;
+    }
+
     pub fn font(&self, bold: bool, italic: bool) -> &FontId {
         match (bold, italic) {
             (true, true) => &self.fonts.bold_italic,
@@ -472,6 +505,14 @@ mod tests {
         let (_doc, fonts) = test_font_set();
         let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
         builder.write_centered("Title", &fonts.regular, Pt(28.0), black());
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn draw_horizontal_rule_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        builder.draw_horizontal_rule(Color::Rgb(Rgb::new(0.5, 0.5, 0.5, None)), 0.5);
         assert_eq!(builder.finish().len(), 1);
     }
 

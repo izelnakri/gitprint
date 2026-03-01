@@ -25,13 +25,13 @@ fix:
 check:
 	cargo fmt -- --check
 	cargo clippy --all-targets -- -D warnings
-	cargo test
+	@cargo nextest --version >/dev/null 2>&1 && cargo nextest run || cargo test
 
 fmt:
 	cargo fmt
 
 test:
-	time cargo test
+	@cargo nextest --version >/dev/null 2>&1 && cargo nextest run || cargo test
 
 build:
 	cargo build

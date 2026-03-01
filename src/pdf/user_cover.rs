@@ -43,7 +43,6 @@ pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
     let lh = builder.line_height();
 
     const TABLE_SIZE: f32 = 9.0;
-    const SEP_SIZE: f32 = 7.5;
 
     let display_name = user.name.as_deref().unwrap_or(&user.login);
 
@@ -66,16 +65,8 @@ pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
     builder.vertical_space(32.0);
 
     // ── Metadata table ─────────────────────────────────────────────────────────
-    let sep = separator_line(builder.usable_width_pt(), SEP_SIZE);
-    let sep_span = || Span {
-        text: sep.clone(),
-        font_id: regular.clone(),
-        size: Pt(SEP_SIZE),
-        color: gray.clone(),
-    };
-
-    builder.write_line(&[sep_span()]);
-    builder.vertical_space(4.0);
+    builder.draw_horizontal_rule(Color::Rgb(Rgb::new(0.75, 0.75, 0.75, None)), 0.5);
+    builder.vertical_space(8.0);
 
     // Build rows dynamically — only show non-empty fields.
     let repos_str = user.public_repos.to_string();
@@ -93,6 +84,11 @@ pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
         / (TABLE_SIZE * CHAR_WIDTH))
         .max(1.0) as usize;
 
+    let email_url = user.email.as_ref().map(|e| format!("mailto:{e}"));
+    let repos_url = format!("{}?tab=repositories", user.html_url);
+    let followers_url = format!("{}?tab=followers", user.html_url);
+    let following_url = format!("{}?tab=following", user.html_url);
+
     [
         ("Bio", user.bio.as_deref().unwrap_or(""), None::<String>),
         ("Location", user.location.as_deref().unwrap_or(""), None),
@@ -108,11 +104,15 @@ pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
                 }
             }),
         ),
-        ("Email", user.email.as_deref().unwrap_or(""), None),
-        ("Public Repos", &repos_str, None),
+        (
+            "Email",
+            user.email.as_deref().unwrap_or(""),
+            email_url.clone(),
+        ),
+        ("Public Repos", &repos_str, Some(repos_url.clone())),
         ("Total Stars", &stars_str, None),
-        ("Followers", &followers_str, None),
-        ("Following", &following_str, None),
+        ("Followers", &followers_str, Some(followers_url.clone())),
+        ("Following", &following_str, Some(following_url.clone())),
         ("Member Since", &member_since, None),
         ("Profile", &user.html_url, Some(user.html_url.clone())),
     ]
@@ -149,7 +149,7 @@ pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
     });
 
     builder.vertical_space(4.0);
-    builder.write_line(&[sep_span()]);
+    builder.draw_horizontal_rule(Color::Rgb(Rgb::new(0.75, 0.75, 0.75, None)), 0.5);
 
     // ── Footer ─────────────────────────────────────────────────────────────────
     let version = env!("CARGO_PKG_VERSION");

@@ -16,32 +16,44 @@ pub fn render(
     let regular = builder.font(false, false).clone();
     let italic = builder.font(false, true).clone();
     let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
-    let gray = Color::Rgb(Rgb::new(0.47, 0.47, 0.47, None));
+    let gray = Color::Rgb(Rgb::new(0.50, 0.50, 0.50, None));
     let dark_gray = Color::Rgb(Rgb::new(0.25, 0.25, 0.25, None));
+    let rule_gray = Color::Rgb(Rgb::new(0.82, 0.82, 0.82, None));
 
     // ── Section title ──────────────────────────────────────────────────────────
     builder.ensure_space(builder.line_height() * 3.0);
     builder.write_centered("Recent Activity", &bold, Pt(16.0), black.clone());
-    builder.vertical_space(12.0);
+    builder.vertical_space(10.0);
+    builder.draw_horizontal_rule(rule_gray.clone(), 0.5);
+    builder.vertical_space(8.0);
 
     // ── Events grouped by date ─────────────────────────────────────────────────
     let mut last_date = String::new();
     events.iter().for_each(|event| {
         let date = event.created_at.get(..10).unwrap_or(&event.created_at);
         if date != last_date {
-            builder.vertical_space(6.0);
+            if !last_date.is_empty() {
+                // Thin rule between date groups for visual separation.
+                builder.vertical_space(4.0);
+                builder.draw_horizontal_rule(rule_gray.clone(), 0.3);
+                builder.vertical_space(8.0);
+            } else {
+                builder.vertical_space(2.0);
+            }
             builder.ensure_space(builder.line_height() * 2.0);
             builder.write_line(&[Span {
                 text: date.to_string(),
                 font_id: bold.clone(),
-                size: Pt(9.0),
+                size: Pt(9.5),
                 color: dark_gray.clone(),
             }]);
             last_date = date.to_string();
+            builder.vertical_space(2.0);
         }
 
         let time = event.created_at.get(11..16).unwrap_or("");
         let description = describe_event(event);
+        let icon = event_icon(event);
 
         // Enrich push events that have no commit info in the payload (force push /
         // rebase). Look up this event's HEAD SHA to get its specific commit message.
@@ -61,12 +73,13 @@ pub fn render(
             (description.main, description.detail)
         };
 
+        let url = event_url(event);
         builder.write_line(&[
             Span {
-                text: "  · ".to_string(),
-                font_id: regular.clone(),
-                size: Pt(8.5),
-                color: gray.clone(),
+                text: format!("{icon} "),
+                font_id: bold.clone(),
+                size: Pt(8.0),
+                color: event_icon_color(event),
             },
             Span {
                 text: format!("{time}  "),
@@ -81,12 +94,12 @@ pub fn render(
                 color: black.clone(),
             },
         ]);
-        if let Some(url) = event_url(event) {
-            builder.add_link(builder.line_height(), Actions::Uri(url));
+        if let Some(u) = &url {
+            builder.add_link(builder.line_height(), Actions::Uri(u.clone()));
         }
 
-        // Detail lines (commit messages, PR diff stats, etc.)
-        detail.iter().for_each(|detail| {
+        // Detail lines (commit messages, PR diff stats, etc.) — also link to the event.
+        detail.iter().for_each(|detail_line| {
             builder.write_line(&[
                 Span {
                     text: "    ".to_string(),
@@ -95,17 +108,57 @@ pub fn render(
                     color: gray.clone(),
                 },
                 Span {
-                    text: detail.clone(),
+                    text: detail_line.clone(),
                     font_id: italic.clone(),
                     size: Pt(7.5),
                     color: gray.clone(),
                 },
             ]);
+            if let Some(u) = &url {
+                builder.add_link(builder.line_height(), Actions::Uri(u.clone()));
+            }
         });
     });
 
     builder.vertical_space(12.0);
     builder.page_break();
+}
+
+// ── Event decorators ────────────────────────────────────────────────────────────
+
+/// Single-character icon using Geometric Shapes (U+25A0–U+25FF) — all present
+/// in JetBrains Mono and rendered reliably across PDF viewers including PDF.js.
+fn event_icon(event: &GitHubEvent) -> &'static str {
+    match event.kind.as_str() {
+        "PushEvent" => "\u{25B6}",         // ▶ black right-pointing triangle
+        "PullRequestEvent" => "\u{25B2}",  // ▲ black up-pointing triangle
+        "IssuesEvent" => "\u{25CF}",       // ● black circle
+        "IssueCommentEvent" => "\u{25E6}", // ◦ white bullet
+        "PullRequestReviewEvent" | "PullRequestReviewCommentEvent" => "\u{25CB}", // ○ white circle
+        "ReleaseEvent" => "\u{25C6}",      // ◆ black diamond
+        "ForkEvent" => "\u{25B7}",         // ▷ white right-pointing triangle
+        "WatchEvent" => "\u{25C6}",        // ◆ black diamond (star/highlight)
+        "CreateEvent" => "\u{25AA}",       // ▪ black small square
+        "DeleteEvent" => "\u{25AB}",       // ▫ white small square
+        _ => "\u{00B7}",                   // · middle dot
+    }
+}
+
+fn event_icon_color(event: &GitHubEvent) -> Color {
+    match event.kind.as_str() {
+        "PushEvent" => Color::Rgb(Rgb::new(0.27, 0.68, 0.96, None)), // blue
+        "PullRequestEvent" => Color::Rgb(Rgb::new(0.55, 0.36, 0.90, None)), // purple
+        "IssuesEvent" => Color::Rgb(Rgb::new(0.96, 0.55, 0.13, None)), // orange
+        "IssueCommentEvent" | "PullRequestReviewEvent" | "PullRequestReviewCommentEvent" => {
+            Color::Rgb(Rgb::new(0.50, 0.50, 0.50, None)) // gray
+        }
+        "ReleaseEvent" => Color::Rgb(Rgb::new(0.13, 0.78, 0.47, None)), // green
+        "WatchEvent" => Color::Rgb(Rgb::new(0.96, 0.80, 0.10, None)),   // gold
+        "ForkEvent" => Color::Rgb(Rgb::new(0.27, 0.68, 0.96, None)),    // blue
+        "CreateEvent" => Color::Rgb(Rgb::new(0.13, 0.78, 0.47, None)),  // green
+        "DeleteEvent" => Color::Rgb(Rgb::new(0.78, 0.25, 0.25, None)),  // red
+        _ => Color::Rgb(Rgb::new(0.50, 0.50, 0.50, None)),
+    }
 }
 
 struct EventDescription {
@@ -124,8 +177,6 @@ fn describe_event(event: &GitHubEvent) -> EventDescription {
                 .unwrap_or("")
                 .trim_start_matches("refs/heads/");
             let commits_arr = p["commits"].as_array();
-            // `size` is the total; `commits` only holds distinct ones and can be empty
-            // even for real pushes (force-push / rebase). Fall back to commits.len().
             let count = p["size"]
                 .as_u64()
                 .map(|n| n as usize)
@@ -214,7 +265,7 @@ fn describe_event(event: &GitHubEvent) -> EventDescription {
         }
         "ForkEvent" => {
             let forkee = p["forkee"]["full_name"].as_str().unwrap_or(repo);
-            (format!("Forked {repo} → {forkee}"), vec![])
+            (format!("Forked {repo} \u{2192} {forkee}"), vec![])
         }
         "WatchEvent" => (format!("Starred {repo}"), vec![]),
         "ReleaseEvent" => {
@@ -249,7 +300,6 @@ fn event_url(event: &GitHubEvent) -> Option<String> {
     let p = &event.payload;
     match event.kind.as_str() {
         "PushEvent" => {
-            // Prefer a direct link to the HEAD commit; fall back to branch tree.
             if let Some(sha) = p["head"].as_str() {
                 Some(format!("https://github.com/{repo}/commit/{sha}"))
             } else {
@@ -351,10 +401,10 @@ mod tests {
     #[test]
     fn describe_push_event() {
         let desc = super::describe_event(&push_event());
-        assert!(desc.main.contains("Pushed 2 commits")); // size absent → falls back to commits.len()
+        assert!(desc.main.contains("Pushed 2 commits"));
         assert!(desc.main.contains("alice/myrepo"));
         assert!(desc.main.contains("main"));
-        assert_eq!(desc.detail.len(), 2); // distinct commits still listed
+        assert_eq!(desc.detail.len(), 2);
     }
 
     #[test]
@@ -362,5 +412,28 @@ mod tests {
         let desc = super::describe_event(&pr_event());
         assert!(desc.main.contains("Opened PR #42"));
         assert!(desc.main.contains("Add dark mode"));
+    }
+
+    #[test]
+    fn event_icons_cover_all_known_types() {
+        [
+            "PushEvent",
+            "PullRequestEvent",
+            "IssuesEvent",
+            "ReleaseEvent",
+            "WatchEvent",
+        ]
+        .iter()
+        .for_each(|kind| {
+            let e = GitHubEvent {
+                kind: kind.to_string(),
+                repo: crate::github::EventRepo {
+                    name: "a/b".to_string(),
+                },
+                payload: serde_json::json!({}),
+                created_at: "2024-01-01T00:00:00Z".to_string(),
+            };
+            assert!(!super::event_icon(&e).is_empty());
+        });
     }
 }
