@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.7] - 2026-03-01
+### Features
+- Now users can do $ gitprint -u izelnakri --commits 100 ([`d802f94`](https://github.com/izelnakri/gitprint/commit/d802f94c3f53a357cb9e31da82c0ff78b9021977))
+- Neon diff palette, rate-limit errors & user report refactor ([`b429f8b`](https://github.com/izelnakri/gitprint/commit/b429f8b1a41b235b5db52ca78487af59ed164c98))
+
 ## [0.3.6] - 2026-02-20
 ### Documentation
 - Add Docker installation guide & nix-aware make release ([`b0486ac`](https://github.com/izelnakri/gitprint/commit/b0486ac10fbc008f181ecec2afd5b398516b000e))
