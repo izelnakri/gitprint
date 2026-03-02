@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.12] - 2026-03-02
+[`v0.3.11...v0.3.12`](https://github.com/izelnakri/gitprint/compare/v0.3.11...v0.3.12)
+
+### Bug Fixes
+- Mark benchmark job continue-on-error in CI — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`8ad6a6f`](https://github.com/izelnakri/gitprint/commit/8ad6a6f62bdc22ff1886a0678839c6fc3d516fd8))
+
 ## [0.3.11] - 2026-03-02
 [`v0.3.10...v0.3.11`](https://github.com/izelnakri/gitprint/compare/v0.3.10...v0.3.11)
 
