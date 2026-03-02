@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.8] - 2026-03-02
+[`v0.3.7...v0.3.8`](https://github.com/izelnakri/gitprint/compare/v0.3.7...v0.3.8)
+
+### Bug Fixes
+- Wire musl-gcc as linker and C compiler for musl CI build — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`5b180d2`](https://github.com/izelnakri/gitprint/commit/5b180d22bc9ecccb6397f66ae90167409f784517))
+- Build musl binary natively in rust:alpine container — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`9842b9d`](https://github.com/izelnakri/gitprint/commit/9842b9deb46c23fbdd41e501b549a50f6a1e3269))
+
+### Features
+- --last-repos, --list-tags, date aliases, offline mock tests — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`873a5be`](https://github.com/izelnakri/gitprint/commit/873a5bea2bfccdd46d56574d58c8e898000b3d9e))
+- Show version and binary size on one line in --help footer — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`886adf5`](https://github.com/izelnakri/gitprint/commit/886adf5050c876983e05a613ff7805d8b1ff4d14))
+- Show git branch as version in cargo run; fix musl CI build — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`3d649de`](https://github.com/izelnakri/gitprint/commit/3d649dea5740d913137e8e2c44d97afd3a678177))
+
+### Performance
+- Pre-build musl binary in CI; Docker just copies it — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`d1fabfc`](https://github.com/izelnakri/gitprint/commit/d1fabfc419dbc7ffc12b903592e591fe36931331))
+
 ## [0.3.7] - 2026-03-01
 [`v0.3.6...v0.3.7`](https://github.com/izelnakri/gitprint/compare/v0.3.6...v0.3.7)
 
