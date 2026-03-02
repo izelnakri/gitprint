@@ -123,7 +123,8 @@ pub struct Args {
 fn after_help_text() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
-        let size_line = std::env::current_exe()
+        let version = env!("CARGO_PKG_VERSION");
+        let size_str = std::env::current_exe()
             .ok()
             .and_then(|p| std::fs::metadata(p).ok())
             .map(|m| {
@@ -133,10 +134,10 @@ fn after_help_text() -> &'static str {
                 } else {
                     (bytes as f64 / 1_024.0, "KB")
                 };
-                format!("Binary size: {size:.1} {unit}\n")
+                format!("{size:.1} {unit}")
             })
-            .unwrap_or_default();
-        format!("{size_line}Sponsor: https://github.com/sponsors/izelnakri")
+            .unwrap_or_else(|| "unknown".to_string());
+        format!("Version: v{version} | Binary size: {size_str}\nSponsor: https://github.com/sponsors/izelnakri")
     })
 }
 
