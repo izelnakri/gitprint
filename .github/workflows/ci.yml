@@ -87,46 +87,15 @@ jobs:
 
   benchmark:
     runs-on: ubuntu-latest
-    # GitHub-hosted runners have variable performance; a strict regression
-    # threshold would produce false failures due to runner load, not real
-    # regressions. The authoritative check runs locally via `make release`.
-    continue-on-error: true
-    env:
-      REGRESSION_THRESHOLD: "20"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      # Restore the most recent main-branch baseline (prefix match so any sha works).
-      - name: Restore benchmark baseline
-        uses: actions/cache/restore@v4
-        with:
-          path: bench-baseline
-          key: bench-baseline-${{ github.sha }}
-          restore-keys: bench-baseline-
-
-      # Run all benchmarks, saving results as "current".
-      # Runs on both PRs and direct main pushes — direct pushes are the same
-      # risk as a local 'make release' bypassing a PR review.
+      # Run all benchmarks and record results as "current". No regression
+      # comparison here — GitHub-hosted runners have too much performance
+      # variance between runs to produce a reliable baseline. The authoritative
+      # check runs locally via `make bench-check` / `make release`, where
+      # hardware is consistent.
       - name: Run benchmarks
         run: cargo bench --bench pipeline -- --save-baseline current
-
-      # scripts/check_benchmarks.py is the single source of truth for the
-      # comparison logic — the same script that 'make bench-check' and
-      # 'make release' use locally.
-      - name: Check for performance regressions
-        run: python3 scripts/check_benchmarks.py
-
-      # Only promote the baseline when landing on main and the check passed.
-      # If the regression check above failed, these two steps are skipped.
-      - name: Save new main baseline
-        if: github.ref == 'refs/heads/main'
-        run: python3 scripts/check_benchmarks.py --save
-
-      - name: Cache benchmark baseline
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: bench-baseline
-          key: bench-baseline-${{ github.sha }}
