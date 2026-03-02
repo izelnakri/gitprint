@@ -75,8 +75,11 @@ release:
 	read confirm < /dev/tty; \
 	case "$$confirm" in \
 		[yY]*) \
-			printf "Waiting for benchmarks...\n"; \
-			wait $$BENCH_PID || { printf "Benchmark run failed:\n"; cat /tmp/gitprint-bench.log; rm -f /tmp/gitprint-bench.log; exit 1; }; \
+			printf "\n=== Benchmark results ===\n"; \
+			tail -f /tmp/gitprint-bench.log & TAIL_PID=$$!; \
+			wait $$BENCH_PID; BENCH_EXIT=$$?; \
+			kill $$TAIL_PID 2>/dev/null; wait $$TAIL_PID 2>/dev/null; \
+			[ $$BENCH_EXIT -eq 0 ] || { printf "\nBenchmark run failed.\n"; rm -f /tmp/gitprint-bench.log; exit 1; }; \
 			REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD) python3 scripts/check_benchmarks.py || { rm -f /tmp/gitprint-bench.log; exit 1; }; \
 			cargo release $(LEVEL) --execute; \
 			TAG=$$(git describe --tags --abbrev=0); \
