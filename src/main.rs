@@ -208,6 +208,12 @@ async fn main() {
         .map(|t| t.path().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(&path));
 
+    if is_remote && args.list_tags {
+        if let Err(e) = gitprint::git::fetch_tags(&repo_path).await {
+            eprintln!("warning: could not fetch tags: {e}");
+        }
+    }
+
     if args.list_tags {
         let tags = gitprint::git::list_repo_tags(&repo_path).await;
         if tags.is_empty() {

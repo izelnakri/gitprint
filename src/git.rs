@@ -699,6 +699,23 @@ fn normalize_to_https(url: &str) -> String {
     url.to_string()
 }
 
+/// Fetches all tag refs from the remote without downloading full history.
+///
+/// Needed after a `--depth=1` clone, which only fetches the tag (if any)
+/// pointing at the cloned commit — other tags are absent until this runs.
+pub async fn fetch_tags(repo_path: &Path) -> anyhow::Result<()> {
+    let status = Command::new("git")
+        .args(["fetch", "--tags", "--depth=1"])
+        .current_dir(repo_path)
+        .status()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to run git: {e}"))?;
+    if !status.success() {
+        bail!("git fetch --tags failed");
+    }
+    Ok(())
+}
+
 /// Lists all version tags in a repository, sorted newest first.
 ///
 /// Uses `git tag --list --sort=-version:refname` which sorts by semver-aware
