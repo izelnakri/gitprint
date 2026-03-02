@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.9] - 2026-03-02
+[`v0.3.8...v0.3.9`](https://github.com/izelnakri/gitprint/compare/v0.3.8...v0.3.9)
+
+### Performance
+- Run benchmarks in background during changelog preview in make release — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`f428a2a`](https://github.com/izelnakri/gitprint/commit/f428a2ae7c588bdcfb65c5372a8c1d6668f24b9d))
+
 ## [0.3.8] - 2026-03-02
 [`v0.3.7...v0.3.8`](https://github.com/izelnakri/gitprint/compare/v0.3.7...v0.3.8)
 
