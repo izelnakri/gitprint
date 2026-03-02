@@ -26,6 +26,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Compile a fully-static musl binary in CI where Swatinem cache is available.
+      # This avoids running cargo inside Docker (which has no cache and takes ~10 min).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get install -y musl-tools
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      # Place the binary where the Dockerfile expects it (repo root = Docker build context).
+      - run: cp target/x86_64-unknown-linux-musl/release/gitprint ./gitprint
+
       - uses: docker/setup-buildx-action@v3
 
       # Login is only needed when actually pushing (main branch pushes).
@@ -45,16 +56,14 @@ jobs:
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
-      # Build on every push (validates the Dockerfile).
-      # Only push to GHCR on main branch pushes.
+      # Docker build is now just: copy pre-built binary + apk add git (~30 sec).
+      # No cargo inside Docker — no layer cache misses on source changes.
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   benchmark:
     runs-on: ubuntu-latest
