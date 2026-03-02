@@ -18,27 +18,35 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
-  package:
+  # Build a fully-static musl binary natively on Alpine (musl is the default
+  # libc there — no cross-compilation or linker hacks needed).
+  build-musl:
     needs: [check]
+    runs-on: ubuntu-latest
+    container: rust:alpine
+    steps:
+      - uses: actions/checkout@v4
+      - run: apk add --no-cache musl-dev git
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitprint-musl
+          path: target/release/gitprint
+
+  package:
+    needs: [build-musl]
     runs-on: ubuntu-latest
     permissions:
       packages: write
     steps:
       - uses: actions/checkout@v4
 
-      # Compile a fully-static musl binary in CI where Swatinem cache is available.
-      # This avoids running cargo inside Docker (which has no cache and takes ~10 min).
-      - uses: dtolnay/rust-toolchain@stable
+      # Download the musl binary built by build-musl into the Docker build context.
+      - uses: actions/download-artifact@v4
         with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y musl-tools musl-dev
-      - run: cargo build --release --target x86_64-unknown-linux-musl
-        env:
-          CC: musl-gcc
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-      # Place the binary where the Dockerfile expects it (repo root = Docker build context).
-      - run: cp target/x86_64-unknown-linux-musl/release/gitprint ./gitprint
+          name: gitprint-musl
+      - run: chmod +x gitprint
 
       - uses: docker/setup-buildx-action@v3
 
@@ -59,8 +67,7 @@ jobs:
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
-      # Docker build is now just: copy pre-built binary + apk add git (~30 sec).
-      # No cargo inside Docker — no layer cache misses on source changes.
+      # Docker build is now just: apk add git + COPY pre-built binary (~30 sec).
       - uses: docker/build-push-action@v6
         with:
           context: .
