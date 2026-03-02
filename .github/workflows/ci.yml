@@ -18,21 +18,27 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
-  # Build a fully-static musl binary natively on Alpine (musl is the default
-  # libc there — no cross-compilation or linker hacks needed).
+  # Build a fully-static musl binary using cargo-zigbuild on ubuntu-latest.
+  # Zig bundles its own assembler/C compiler with native musl support, so the
+  # ring crate (reqwest/rustls) assembles correctly without system musl packages.
+  # Running on ubuntu-latest (not inside a container) lets Swatinem properly
+  # cache target/ between pushes — warm builds take ~1 min instead of 6+.
   build-musl:
     needs: [check]
     runs-on: ubuntu-latest
-    container: rust:alpine
     steps:
       - uses: actions/checkout@v4
-      - run: apk add --no-cache musl-dev git
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
+      - uses: mlugg/setup-zig@v2
+      - run: cargo install cargo-zigbuild --locked
+      - run: cargo zigbuild --release --target x86_64-unknown-linux-musl
       - uses: actions/upload-artifact@v4
         with:
           name: gitprint-musl
-          path: target/release/gitprint
+          path: target/x86_64-unknown-linux-musl/release/gitprint
 
   package:
     needs: [build-musl]
