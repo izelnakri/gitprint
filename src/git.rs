@@ -699,6 +699,21 @@ fn normalize_to_https(url: &str) -> String {
     url.to_string()
 }
 
+/// Lists all version tags in a repository, sorted newest first.
+///
+/// Uses `git tag --list --sort=-version:refname` which sorts by semver-aware
+/// descending order so `v1.10.0` sorts before `v1.9.0`.
+/// Returns an empty Vec if there are no tags or the path is not a git repo.
+pub async fn list_repo_tags(repo_path: &Path) -> Vec<String> {
+    run_git(repo_path, &["tag", "--list", "--sort=-version:refname"])
+        .await
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Returns the remote URL for `origin`, if one is configured.
 ///
 /// Runs `git remote get-url origin` — if the repo has no remote or the command

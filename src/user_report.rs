@@ -37,7 +37,7 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         github::get_user(username, token),
         github::get_user_starred_repos(username, 5, token),
         github::get_user_repos(username, "updated", 5, token),
-        github::get_user_repos(username, "pushed", config.last_committed, token),
+        github::get_user_repos(username, "pushed", config.last_repos, token),
         // Fetch up to 100 events (GitHub API max per page) so date/activity
         // filters have the most events to work with before the display limit is applied.
         github::get_user_events(username, 100, token),
@@ -237,7 +237,7 @@ pub(crate) fn render_to_doc(
         &mut builder,
         "Repos User Pushed To",
         &data.pushed_repos,
-        config.last_committed,
+        config.last_repos,
         &data.events,
         &data.commit_msgs,
     );
@@ -408,7 +408,7 @@ mod tests {
             output_path: "/tmp/test-commits.pdf".into(),
             paper_size: PaperSize::A4,
             landscape: false,
-            last_committed: 0,
+            last_repos: 0,
             commits,
             no_diffs: false,
             font_size: 8.0,

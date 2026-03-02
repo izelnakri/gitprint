@@ -94,7 +94,7 @@ pub struct CommitFile {
 
 // ── Client helpers ──────────────────────────────────────────────────────────────
 
-fn build_client() -> anyhow::Result<reqwest::Client> {
+pub(crate) fn build_client() -> anyhow::Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(format!("gitprint/{VERSION}"))
         .build()
@@ -105,7 +105,7 @@ fn auth_header(token: Option<&str>) -> Option<String> {
     token.map(|t| format!("Bearer {t}"))
 }
 
-async fn get_json<T: for<'de> Deserialize<'de>>(
+pub(crate) async fn get_json<T: for<'de> Deserialize<'de>>(
     client: &reqwest::Client,
     url: &str,
     token: Option<&str>,
@@ -280,6 +280,7 @@ pub async fn get_commit_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::prelude::*;
 
     #[test]
     fn auth_header_some() {
@@ -291,8 +292,128 @@ mod tests {
         assert_eq!(auth_header(None), None);
     }
 
-    #[test]
-    fn build_client_succeeds() {
-        assert!(build_client().is_ok());
+    #[tokio::test]
+    async fn parses_user_response() -> anyhow::Result<()> {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/users/alice");
+            then.status(200).json_body(serde_json::json!({
+                "login": "alice", "name": "Alice", "bio": null, "location": null,
+                "company": null, "blog": null, "email": null, "public_repos": 10,
+                "followers": 42, "following": 5, "created_at": "2020-01-01T00:00:00Z",
+                "html_url": "https://github.com/alice"
+            }));
+        });
+
+        let client = build_client()?;
+        let user: GitHubUser =
+            get_json(&client, &format!("{}/users/alice", server.base_url()), None).await?;
+        assert_eq!(user.login, "alice");
+        assert_eq!(user.public_repos, 10);
+        assert_eq!(user.followers, 42);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn parses_repo_list_response() -> anyhow::Result<()> {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/users/alice/repos");
+            then.status(200).json_body(serde_json::json!([{
+                "name": "myrepo", "full_name": "alice/myrepo",
+                "html_url": "https://github.com/alice/myrepo", "description": null,
+                "language": "Rust", "stargazers_count": 7, "forks_count": 1,
+                "pushed_at": "2024-03-01T00:00:00Z", "updated_at": "2024-03-01T00:00:00Z",
+                "fork": false
+            }]));
+        });
+
+        let client = build_client()?;
+        let repos: Vec<GitHubRepo> = get_json(
+            &client,
+            &format!("{}/users/alice/repos", server.base_url()),
+            None,
+        )
+        .await?;
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "myrepo");
+        assert_eq!(repos[0].stargazers_count, 7);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn parses_event_list_response() -> anyhow::Result<()> {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/users/alice/events/public");
+            then.status(200).json_body(serde_json::json!([{
+                "type": "PushEvent",
+                "repo": { "name": "alice/myrepo" },
+                "payload": { "ref": "refs/heads/main", "commits": [] },
+                "created_at": "2024-03-01T12:00:00Z"
+            }]));
+        });
+
+        let client = build_client()?;
+        let events: Vec<GitHubEvent> = get_json(
+            &client,
+            &format!("{}/users/alice/events/public", server.base_url()),
+            None,
+        )
+        .await?;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "PushEvent");
+        assert_eq!(events[0].repo.name, "alice/myrepo");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn parses_commit_detail_response() -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let sha = "abc1234abc1234abc1234abc1234abc1234abc1234";
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/repos/alice/myrepo/commits/{sha}"));
+            then.status(200).json_body(serde_json::json!({
+                "sha": sha,
+                "html_url": "https://github.com/alice/myrepo/commit/abc1234",
+                "commit": {
+                    "message": "fix: handle edge case",
+                    "author": { "name": "Alice", "date": "2024-03-01T12:00:00Z" }
+                },
+                "files": [{
+                    "filename": "src/lib.rs", "status": "modified",
+                    "additions": 5, "deletions": 2, "patch": "+added line\n-removed line"
+                }]
+            }));
+        });
+
+        let client = build_client()?;
+        let detail: CommitDetail = get_json(
+            &client,
+            &format!("{}/repos/alice/myrepo/commits/{sha}", server.base_url()),
+            None,
+        )
+        .await?;
+        assert_eq!(detail.sha, sha);
+        assert_eq!(detail.commit.message, "fix: handle edge case");
+        assert_eq!(detail.files[0].additions, 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rate_limit_error_is_surfaced() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/users/alice");
+            then.status(403);
+        });
+
+        let client = build_client().unwrap();
+        let err =
+            get_json::<GitHubUser>(&client, &format!("{}/users/alice", server.base_url()), None)
+                .await
+                .unwrap_err();
+        assert!(err.to_string().contains("rate limit"), "got: {err}");
     }
 }

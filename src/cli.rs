@@ -72,10 +72,14 @@ pub struct Args {
     #[arg(long)]
     pub list_themes: bool,
 
+    /// List version tags of the repository and exit
+    #[arg(long)]
+    pub list_tags: bool,
+
     // ── User-report flags (only meaningful with -u/--user) ─────────────────────
     /// Number of most-recently-pushed repos to include in the user report [default: 5]
     #[arg(long, default_value_t = 5)]
-    pub last_committed: usize,
+    pub last_repos: usize,
 
     /// Number of recent commits with diffs to render in the user report [default: 5]
     #[arg(long, default_value_t = 5)]
@@ -88,8 +92,10 @@ pub struct Args {
     /// Show events from this date forward [default: no lower bound; GitHub keeps ≤ 90 days]
     ///
     /// Accepted formats:
-    ///   Machine-readable  2024-01-15  or  2024-01-15T00:00:00Z
-    ///   Human-readable    today · yesterday · 30 days ago · 2 weeks ago · 1 month ago
+    ///   ISO date    2024-01-15  or  2024-01-15T00:00:00Z
+    ///   Keywords    today · yesterday
+    ///   Named       last week · last month · last year
+    ///   Relative    30 days ago · 2 weeks ago · 1 month ago · 1 year ago
     #[arg(long, value_name = "DATE")]
     pub since: Option<String>,
 
@@ -192,7 +198,7 @@ mod tests {
     #[test]
     fn user_report_flags_defaults() {
         let args = Args::parse_from(["gitprint", "-u", "alice"]);
-        assert_eq!(args.last_committed, 5);
+        assert_eq!(args.last_repos, 5);
         assert_eq!(args.commits, 5);
         assert!(!args.no_diffs);
         assert_eq!(args.events, 30);
@@ -283,6 +289,14 @@ mod tests {
         assert!(matches!(args.paper_size, PaperSize::Letter));
         assert!(args.landscape);
         assert!(args.list_themes);
+    }
+
+    #[test]
+    fn list_tags_flag() {
+        let args = Args::parse_from(["gitprint", ".", "--list-tags"]);
+        assert!(args.list_tags);
+        let args = Args::parse_from(["gitprint", "."]);
+        assert!(!args.list_tags);
     }
 
     #[test]

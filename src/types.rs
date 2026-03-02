@@ -17,7 +17,7 @@ pub struct UserReportConfig {
     pub paper_size: PaperSize,
     pub landscape: bool,
     /// Number of most-recently-pushed repos to include (0 = skip section).
-    pub last_committed: usize,
+    pub last_repos: usize,
     /// Number of recent commits with diffs to render (0 = skip diffs).
     pub commits: usize,
     /// Skip diff rendering entirely.

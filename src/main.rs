@@ -6,7 +6,10 @@ use clap::Parser;
 ///
 /// Accepted formats:
 /// - ISO 8601: `2024-01-15` or `2024-01-15T00:00:00Z`
-/// - Relative:  `today`, `yesterday`, `N days ago`, `N weeks ago`, `N months ago`
+/// - Keywords: `today`, `yesterday`
+/// - Named: `last week` · `last month` · `last year` · `this week` · `this month` · `this year`
+/// - Relative: `N days ago` · `N weeks ago` · `N months ago` · `N years ago`
+///   (singular and plural both accepted: "1 day ago" or "2 days ago")
 fn parse_date_filter(s: &str) -> anyhow::Result<String> {
     let s = s.trim();
     // ISO 8601: starts with four-digit year followed by '-'
@@ -18,6 +21,12 @@ fn parse_date_filter(s: &str) -> anyhow::Result<String> {
         0
     } else if lower == "yesterday" {
         1
+    } else if lower == "last week" || lower == "this week" {
+        7
+    } else if lower == "last month" || lower == "this month" {
+        30
+    } else if lower == "last year" || lower == "this year" {
+        365
     } else if let Some(n) = lower
         .strip_suffix(" days ago")
         .or_else(|| lower.strip_suffix(" day ago"))
@@ -41,11 +50,22 @@ fn parse_date_filter(s: &str) -> anyhow::Result<String> {
             .parse::<u64>()
             .map_err(|_| anyhow::anyhow!("invalid date: {s:?}"))?
             * 30
+    } else if let Some(n) = lower
+        .strip_suffix(" years ago")
+        .or_else(|| lower.strip_suffix(" year ago"))
+    {
+        n.trim()
+            .parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("invalid date: {s:?}"))?
+            * 365
     } else {
         anyhow::bail!(
             "unrecognized date: {s:?}\n\
-             Accepted: 2024-01-15 · today · yesterday · 30 days ago · 2 weeks ago · 1 month ago\n\
-             (singular and plural both accepted: \"1 day ago\" or \"2 days ago\")"
+             Accepted:\n\
+             · ISO date:   2024-01-15\n\
+             · Keywords:   today · yesterday\n\
+             · Named:      last week · last month · last year\n\
+             · Relative:   30 days ago · 2 weeks ago · 1 month ago · 1 year ago"
         );
     };
     let secs = std::time::SystemTime::now()
@@ -126,7 +146,7 @@ async fn main() {
             output_path,
             paper_size: args.paper_size,
             landscape: args.landscape,
-            last_committed: args.last_committed,
+            last_repos: args.last_repos,
             commits: args.commits,
             no_diffs: args.no_diffs,
             font_size: args.font_size,
@@ -188,6 +208,16 @@ async fn main() {
         .map(|t| t.path().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(&path));
 
+    if args.list_tags {
+        let tags = gitprint::git::list_repo_tags(&repo_path).await;
+        if tags.is_empty() {
+            eprintln!("No tags found.");
+        } else {
+            tags.iter().for_each(|t| println!("{t}"));
+        }
+        return;
+    }
+
     let output_path = args.output.unwrap_or_else(|| {
         let name = if is_remote {
             gitprint::git::repo_name_from_url(&path)
@@ -229,44 +259,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_iso_date() {
-        assert_eq!(parse_date_filter("2024-01-15").unwrap(), "2024-01-15");
+    fn parse_iso_date() -> anyhow::Result<()> {
+        assert_eq!(parse_date_filter("2024-01-15")?, "2024-01-15");
         // ISO with time component — truncated to date
-        assert_eq!(
-            parse_date_filter("2024-06-30T12:00:00Z").unwrap(),
-            "2024-06-30"
-        );
+        assert_eq!(parse_date_filter("2024-06-30T12:00:00Z")?, "2024-06-30");
+        Ok(())
     }
 
     #[test]
-    fn parse_relative_dates() {
+    fn parse_relative_dates() -> anyhow::Result<()> {
         // "today" and "yesterday" produce plausible YYYY-MM-DD strings
-        let today = parse_date_filter("today").unwrap();
+        let today = parse_date_filter("today")?;
         assert_eq!(today.len(), 10);
         assert!(today.starts_with("20"));
 
-        let yesterday = parse_date_filter("yesterday").unwrap();
+        let yesterday = parse_date_filter("yesterday")?;
         assert!(yesterday <= today);
+        Ok(())
     }
 
     #[test]
-    fn parse_n_days_ago() {
-        let d = parse_date_filter("30 days ago").unwrap();
+    fn parse_n_days_ago() -> anyhow::Result<()> {
+        let d = parse_date_filter("30 days ago")?;
         assert_eq!(d.len(), 10);
-        let today = parse_date_filter("today").unwrap();
+        let today = parse_date_filter("today")?;
         assert!(d <= today);
+        Ok(())
     }
 
     #[test]
-    fn parse_n_weeks_ago() {
-        let d = parse_date_filter("2 weeks ago").unwrap();
+    fn parse_n_weeks_ago() -> anyhow::Result<()> {
+        let d = parse_date_filter("2 weeks ago")?;
         assert_eq!(d.len(), 10);
+        Ok(())
     }
 
     #[test]
-    fn parse_n_months_ago() {
-        let d = parse_date_filter("1 month ago").unwrap();
+    fn parse_n_months_ago() -> anyhow::Result<()> {
+        let d = parse_date_filter("1 month ago")?;
         assert_eq!(d.len(), 10);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_n_years_ago() -> anyhow::Result<()> {
+        let d = parse_date_filter("1 year ago")?;
+        assert_eq!(d.len(), 10);
+        let d2 = parse_date_filter("2 years ago")?;
+        assert_eq!(d2.len(), 10);
+        assert!(d2 <= d);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_named_aliases() -> anyhow::Result<()> {
+        let today = parse_date_filter("today")?;
+        let last_week = parse_date_filter("last week")?;
+        let this_week = parse_date_filter("this week")?;
+        assert_eq!(last_week, this_week);
+        assert!(last_week <= today);
+
+        let last_month = parse_date_filter("last month")?;
+        let this_month = parse_date_filter("this month")?;
+        assert_eq!(last_month, this_month);
+        assert!(last_month <= last_week);
+
+        let last_year = parse_date_filter("last year")?;
+        let this_year = parse_date_filter("this year")?;
+        assert_eq!(last_year, this_year);
+        assert!(last_year <= last_month);
+        Ok(())
     }
 
     #[test]
