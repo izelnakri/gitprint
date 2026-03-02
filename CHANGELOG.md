@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.11] - 2026-03-02
+[`v0.3.10...v0.3.11`](https://github.com/izelnakri/gitprint/compare/v0.3.10...v0.3.11)
+
+### Bug Fixes
+- Use actions/cache with explicit paths for musl build caching — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`8135e56`](https://github.com/izelnakri/gitprint/commit/8135e56af98800e4eb36a0c9eaecde5af3192cce))
+- Fetch tags from remote before --list-tags on shallow clones — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`aac98e4`](https://github.com/izelnakri/gitprint/commit/aac98e442f3dcba2ba63adede221fe9892e01c28))
+
+### Performance
+- Improve "build-musl" CI workflow time — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`b5f5dd8`](https://github.com/izelnakri/gitprint/commit/b5f5dd8b9ac548110915aa965a480ba68cae0c37))
+
 ## [0.3.9] - 2026-03-02
 [`v0.3.8...v0.3.9`](https://github.com/izelnakri/gitprint/compare/v0.3.8...v0.3.9)
 
