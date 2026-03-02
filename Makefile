@@ -54,10 +54,11 @@ bench-check:
 	cargo bench --bench pipeline -- --save-baseline current
 	REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD) python3 scripts/check_benchmarks.py
 
-# bench-check runs before the interactive prompt so the developer sees benchmark
-# results alongside the changelog preview before deciding to confirm the release.
-# After a successful cargo release the "current" results are promoted to the new
-# baseline so the next release compares against the just-shipped version.
+# Benchmarks run in the background while the developer reads the changelog
+# preview — reading time is free CPU time. Results are checked after the
+# developer confirms, before cargo-release runs. Aborts kill the background
+# process cleanly. `fix` is intentionally excluded: auto-modifying code at
+# release time is unsafe; run `make fix` manually if check fails.
 # If not already inside a nix shell, re-enters via `nix develop` so git-cliff
 # and cargo-release are available. `exec` replaces the shell process, preventing
 # any subsequent commands from running outside nix.
@@ -66,19 +67,23 @@ release:
 		echo "==> Entering nix develop (git-cliff, cargo-release)..."; \
 		exec nix develop --command $(MAKE) release LEVEL=$(LEVEL) REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD); \
 	fi; \
-	$(MAKE) fix check bench-check; \
+	$(MAKE) check; \
+	cargo bench --bench pipeline -- --save-baseline current > /tmp/gitprint-bench.log 2>&1 & BENCH_PID=$$!; \
 	printf "\n=== Release Preview (level: $(LEVEL)) ===\n\n"; \
 	git-cliff --bump --unreleased 2>/dev/null || true; \
 	printf "\nProceed with $(LEVEL) release? [y/N] " > /dev/tty; \
 	read confirm < /dev/tty; \
 	case "$$confirm" in \
 		[yY]*) \
+			printf "Waiting for benchmarks...\n"; \
+			wait $$BENCH_PID || { printf "Benchmark run failed:\n"; cat /tmp/gitprint-bench.log; rm -f /tmp/gitprint-bench.log; exit 1; }; \
+			REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD) python3 scripts/check_benchmarks.py || { rm -f /tmp/gitprint-bench.log; exit 1; }; \
 			cargo release $(LEVEL) --execute; \
 			TAG=$$(git describe --tags --abbrev=0); \
 			awk '/^## \[/{if(found) exit; found=1} found' CHANGELOG.md > /tmp/release-notes.md; \
 			gh release create "$$TAG" --title "$$TAG" --notes-file /tmp/release-notes.md; \
-			rm -f /tmp/release-notes.md; \
+			rm -f /tmp/release-notes.md /tmp/gitprint-bench.log; \
 			REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD) python3 scripts/check_benchmarks.py --save \
 		;; \
-		*) echo "Aborted."; exit 1 ;; \
+		*) printf "Aborted.\n"; kill $$BENCH_PID 2>/dev/null; rm -f /tmp/gitprint-bench.log; exit 1 ;; \
 	esac
