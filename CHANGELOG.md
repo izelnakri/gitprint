@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.15] - 2026-03-03
+[`v0.3.14...v0.3.15`](https://github.com/izelnakri/gitprint/compare/v0.3.14...v0.3.15)
+
+### Bug Fixes
+- Drop rust:alpine container for build-musl, use musl-tools instead — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`0d6d83e`](https://github.com/izelnakri/gitprint/commit/0d6d83e6303c4c44299a4907c1c0ddae3e967848))
+
 ## [0.3.14] - 2026-03-03
 [`v0.3.13...v0.3.14`](https://github.com/izelnakri/gitprint/compare/v0.3.13...v0.3.14)
 
