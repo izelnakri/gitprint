@@ -35,6 +35,10 @@ harness = false
 # Run git-cliff inside cargo-release's own transaction so CHANGELOG.md is
 # written after the dirty check passes and included in the release commit.
 pre-release-hook = ["git-cliff", "--tag", "v{{version}}", "-o", "CHANGELOG.md"]
+# make release already runs `make check` (fmt + clippy + tests) immediately
+# before invoking cargo-release, so skipping the duplicate test run here
+# saves ~1-2 min without reducing safety.
+verify = false
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"

@@ -1,18 +1,12 @@
 name: Release Binaries
 
-# Builds native binaries for every major platform and publishes them:
-#   - push to main/develop  →  nightly pre-release (gitprint-nightly-main, gitprint-nightly-develop)
-#   - push tag v*           →  versioned GitHub release with auto-generated notes
+# Builds native binaries for every major platform and publishes them on
+# versioned tag pushes (e.g. v1.2.3). Nightly Docker images are published
+# on every main-branch commit by ci.yml — no duplication needed here.
 
 on:
   push:
-    branches: [main, develop]
     tags: ['v*']
-
-# Cancel any in-progress run for the same ref so pushes don't pile up.
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -119,13 +113,10 @@ jobs:
           # Each job uploads exactly one archive; glob picks whichever extension was created.
           path: gitprint-${{ matrix.target }}.*
 
-  # ── Docker image (versioned tags only) ───────────────────────────────────────
+  # ── Docker image ─────────────────────────────────────────────────────────────
   # Publishes ghcr.io/izelnakri/gitprint:<version>, <major>.<minor>, and latest.
-  # Nightly Docker images (pushed on every main-branch commit) are handled by
-  # ci.yml's package job — no duplication needed here for branch pushes.
   package:
     name: Publish Docker image
-    if: startsWith(github.ref, 'refs/tags/')
     needs: [build]
     runs-on: ubuntu-latest
     permissions:
@@ -152,7 +143,7 @@ jobs:
             type=raw,value=latest
 
       # Deps layer is already cached from CI runs on main — release builds
-      # only recompile gitprint itself (~1-2 min).
+      # only recompile gitprint itself (~30 s).
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -171,7 +162,6 @@ jobs:
       contents: write   # required to create/delete GitHub releases and tags
 
     steps:
-      # Needed to resolve `git log` for the nightly release description.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -185,12 +175,10 @@ jobs:
       - name: Generate SHA-256 checksums
         run: cd artifacts && sha256sum * > checksums.txt
 
-      # ── Tagged release (e.g. v1.2.3) ────────────────────────────────────────
       # make release creates the GitHub Release entry locally (with CHANGELOG notes)
       # before pushing the tag, so CI only needs to upload the built artifacts.
       # The create fallback handles the rare case where CI wins the race.
       - name: Upload artifacts to versioned release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -199,34 +187,3 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes 2>/dev/null || true
           gh release upload "${{ github.ref_name }}" --clobber artifacts/*
-
-      # ── Nightly pre-release (branch push) ───────────────────────────────────
-      # The tag is derived from the branch name so main and develop get
-      # independent rolling releases: nightly-main, nightly-develop, etc.
-      - name: Publish nightly pre-release
-        if: "!startsWith(github.ref, 'refs/tags/')"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: |
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          TAG="nightly-${BRANCH//\//-}"
-
-          # Delete the previous nightly for this branch (tag + release) and recreate
-          # atomically so users always find a single up-to-date entry.
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-
-          {
-            printf 'Automated development build from the `%s` branch.\n\n' "$BRANCH"
-            printf '> **Not recommended for production use.**\n\n'
-            printf '| | |\n|---|---|\n'
-            printf '| **Commit** | `%s` |\n' "${{ github.sha }}"
-            printf '| **Message** | %s |\n' "$COMMIT_MSG"
-          } > /tmp/notes.md
-
-          gh release create "$TAG" \
-            --prerelease \
-            --title "nightly ($BRANCH)" \
-            --notes-file /tmp/notes.md \
-            artifacts/*

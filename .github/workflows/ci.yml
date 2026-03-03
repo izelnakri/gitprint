@@ -7,17 +7,32 @@ on:
     branches: [main]
 
 jobs:
-  check:
+  # ── Lint (fast) ──────────────────────────────────────────────────────────────
+  # Surfaces formatting and clippy failures in ~1 min, independently of tests.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Toolchain version + components come from rust-toolchain.toml — same as nix dev shell.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
 
+  # ── Test ─────────────────────────────────────────────────────────────────────
+  # Runs in parallel with lint; nextest executes tests in parallel processes
+  # (~2× faster than cargo test on multi-core runners).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - run: cargo nextest run
+
+  # ── Docker image ─────────────────────────────────────────────────────────────
   # The Dockerfile is a multi-stage build that compiles gitprint inside
   # rust:alpine (no cross-compilation, ring works natively). Deps are compiled
   # in a separate layer cached by Docker's GHA layer cache — only invalidated
@@ -25,7 +40,7 @@ jobs:
   # itself (~30 s warm). LTO is overridden to thin inside Docker (fat LTO
   # cannot be layer-cached and would add 3+ min of link time on every push).
   package:
-    needs: [check]
+    needs: [lint, test]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -52,7 +67,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       # GHA layer cache: deps layer is restored from cache on warm runs so only
-      # the gitprint source layer needs to rebuild (~1-2 min instead of 6+ min).
+      # the gitprint source layer needs to rebuild (~30 s instead of 6+ min).
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,17 +77,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ── Benchmarks (main only) ────────────────────────────────────────────────────
+  # Run all benchmarks and record results as "current". No regression
+  # comparison here — GitHub-hosted runners have too much performance
+  # variance between runs to produce a reliable baseline. The authoritative
+  # check runs locally via `make bench-check` / `make release`, where
+  # hardware is consistent. Skipped on PRs since results would be discarded.
   benchmark:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      # Run all benchmarks and record results as "current". No regression
-      # comparison here — GitHub-hosted runners have too much performance
-      # variance between runs to produce a reliable baseline. The authoritative
-      # check runs locally via `make bench-check` / `make release`, where
-      # hardware is consistent.
       - name: Run benchmarks
         run: cargo bench --bench pipeline -- --save-baseline current
