@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.14] - 2026-03-03
+[`v0.3.13...v0.3.14`](https://github.com/izelnakri/gitprint/compare/v0.3.13...v0.3.14)
+
+### Bug Fixes
+- Download musl binary before Docker build in release package job — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`ccfba9c`](https://github.com/izelnakri/gitprint/commit/ccfba9cd8918ab473b221640bdd5d9ba65d38451))
+
 ## [0.3.13] - 2026-03-03
 [`v0.3.12...v0.3.13`](https://github.com/izelnakri/gitprint/compare/v0.3.12...v0.3.13)
 
