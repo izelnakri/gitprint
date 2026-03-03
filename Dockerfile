@@ -7,9 +7,9 @@ WORKDIR /app
 # Empty stubs for src/main.rs and src/lib.rs satisfy cargo without pulling in
 # any project source — all external crates still get fully compiled.
 COPY Cargo.toml Cargo.lock build.rs ./
-RUN mkdir -p src && \
+RUN mkdir -p src benches && \
     printf 'fn main() {}\n' > src/main.rs && \
-    touch src/lib.rs && \
+    touch src/lib.rs benches/pipeline.rs && \
     cargo build --release && \
     cargo clean -p gitprint
 
