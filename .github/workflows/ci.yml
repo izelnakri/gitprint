@@ -18,11 +18,16 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
-  # Build a fully-static musl binary natively on Alpine (musl is the default
-  # libc there — no cross-compilation or linker hacks needed).
-  # actions/cache@v4 is used instead of Swatinem because rust:alpine sets
-  # CARGO_HOME=/usr/local/cargo (not ~/.cargo), which Swatinem doesn't detect,
-  # causing it to miss target/ on every run. Explicit paths fix this.
+  # Build a fully-static musl binary natively inside rust:alpine (musl is the
+  # default libc there — ring and all deps compile without cross-compilation).
+  #
+  # Caching fix: rust:alpine sets CARGO_HOME=/usr/local/cargo which is a
+  # container-only path — the host runner cannot see it, so actions/cache
+  # silently saves/restores nothing. Redirecting CARGO_HOME into the workspace
+  # (shared between host and container via Docker volume mount) makes both
+  # .cargo/ and target/ accessible to the host-side cache action.
+  # The Rust version is included in the cache key so a new rust:alpine image
+  # (with a newer Rust release) gets a fresh cache instead of stale artifacts.
   build-musl:
     needs: [check]
     runs-on: ubuntu-latest
@@ -30,14 +35,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: apk add --no-cache git
+      - name: Redirect CARGO_HOME into workspace and capture Rust version
+        id: env
+        run: |
+          echo "CARGO_HOME=$GITHUB_WORKSPACE/.cargo" >> $GITHUB_ENV
+          echo "rustc=$(rustc --version)" >> $GITHUB_OUTPUT
       - uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo/registry/
-            /usr/local/cargo/git/
+            .cargo/registry
+            .cargo/git
             target/
-          key: musl-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: musl-
+          key: musl-${{ steps.env.outputs.rustc }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: musl-${{ steps.env.outputs.rustc }}-
       - run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:
