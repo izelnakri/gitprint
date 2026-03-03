@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.20] - 2026-03-03
+[`v0.3.19...v0.3.20`](https://github.com/izelnakri/gitprint/compare/v0.3.19...v0.3.20)
+
+### Performance
+- Parallelise CI, add nextest, skip nightly binary builds on main push — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`079f169`](https://github.com/izelnakri/gitprint/commit/079f169cccb909ed7d9c0056586793f653757c9f))
+
 ## [0.3.18] - 2026-03-03
 [`v0.3.17...v0.3.18`](https://github.com/izelnakri/gitprint/compare/v0.3.17...v0.3.18)
 
