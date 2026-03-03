@@ -21,8 +21,9 @@ jobs:
   # The Dockerfile is a multi-stage build that compiles gitprint inside
   # rust:alpine (no cross-compilation, ring works natively). Deps are compiled
   # in a separate layer cached by Docker's GHA layer cache — only invalidated
-  # when Cargo.toml/Cargo.lock/build.rs change. Source changes recompile only
-  # gitprint itself (~1-2 min warm vs 6+ min with a separate build-musl job).
+  # when Cargo.toml/Cargo.lock change. Source changes recompile only gitprint
+  # itself (~30 s warm). LTO is overridden to thin inside Docker (fat LTO
+  # cannot be layer-cached and would add 3+ min of link time on every push).
   package:
     needs: [check]
     runs-on: ubuntu-latest
