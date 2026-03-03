@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.18] - 2026-03-03
+[`v0.3.17...v0.3.18`](https://github.com/izelnakri/gitprint/compare/v0.3.17...v0.3.18)
+
+### Performance
+- Override fat LTO in Docker builds to cut link time from 3+ min to ~20 s — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`168c2bc`](https://github.com/izelnakri/gitprint/commit/168c2bce2d0392c058bc66062393a6ac8ec67301))
+
 ## [0.3.17] - 2026-03-03
 [`v0.3.16...v0.3.17`](https://github.com/izelnakri/gitprint/compare/v0.3.16...v0.3.17)
 
