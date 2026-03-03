@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.13] - 2026-03-03
+[`v0.3.12...v0.3.13`](https://github.com/izelnakri/gitprint/compare/v0.3.12...v0.3.13)
+
+### Bug Fixes
+- Remove benchmark regression comparison from CI — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`d05d8f6`](https://github.com/izelnakri/gitprint/commit/d05d8f6c3a97c3b316d42d7b44b4f6e60273f874))
+- Remove benchmark regression check from release.yml — 2026-03-02 by [@izelnakri](https://github.com/izelnakri) ([`7b0c1a7`](https://github.com/izelnakri/gitprint/commit/7b0c1a733a2d53b90e1411ee63cce22a9295a18c))
+
 ## [0.3.12] - 2026-03-02
 [`v0.3.11...v0.3.12`](https://github.com/izelnakri/gitprint/compare/v0.3.11...v0.3.12)
 
