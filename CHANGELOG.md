@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.16] - 2026-03-03
+[`v0.3.15...v0.3.16`](https://github.com/izelnakri/gitprint/compare/v0.3.15...v0.3.16)
+
+### Bug Fixes
+- Add stub benches/pipeline.rs to Dockerfile deps layer — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`cd32b0c`](https://github.com/izelnakri/gitprint/commit/cd32b0c3d16c3fce1872920bbac28337b1af1486))
+
+### Performance
+- Replace build-musl + pre-built binary with multi-stage Dockerfile — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`511a045`](https://github.com/izelnakri/gitprint/commit/511a045732e21eeda3224b72fb7476d1064c9313))
+
 ## [0.3.15] - 2026-03-03
 [`v0.3.14...v0.3.15`](https://github.com/izelnakri/gitprint/compare/v0.3.14...v0.3.15)
 
