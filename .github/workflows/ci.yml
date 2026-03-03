@@ -18,55 +18,18 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
-  # Build a fully-static musl binary natively inside rust:alpine (musl is the
-  # default libc there — ring and all deps compile without cross-compilation).
-  #
-  # Caching fix: rust:alpine sets CARGO_HOME=/usr/local/cargo which is a
-  # container-only path — the host runner cannot see it, so actions/cache
-  # silently saves/restores nothing. Redirecting CARGO_HOME into the workspace
-  # (shared between host and container via Docker volume mount) makes both
-  # .cargo/ and target/ accessible to the host-side cache action.
-  # The Rust version is included in the cache key so a new rust:alpine image
-  # (with a newer Rust release) gets a fresh cache instead of stale artifacts.
-  build-musl:
-    needs: [check]
-    runs-on: ubuntu-latest
-    container: rust:alpine
-    steps:
-      - uses: actions/checkout@v4
-      - run: apk add --no-cache git
-      - name: Redirect CARGO_HOME into workspace and capture Rust version
-        id: env
-        run: |
-          echo "CARGO_HOME=$GITHUB_WORKSPACE/.cargo" >> $GITHUB_ENV
-          echo "rustc=$(rustc --version)" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v4
-        with:
-          path: |
-            .cargo/registry
-            .cargo/git
-            target/
-          key: musl-${{ steps.env.outputs.rustc }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: musl-${{ steps.env.outputs.rustc }}-
-      - run: cargo build --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gitprint-musl
-          path: target/release/gitprint
-
+  # The Dockerfile is a multi-stage build that compiles gitprint inside
+  # rust:alpine (no cross-compilation, ring works natively). Deps are compiled
+  # in a separate layer cached by Docker's GHA layer cache — only invalidated
+  # when Cargo.toml/Cargo.lock/build.rs change. Source changes recompile only
+  # gitprint itself (~1-2 min warm vs 6+ min with a separate build-musl job).
   package:
-    needs: [build-musl]
+    needs: [check]
     runs-on: ubuntu-latest
     permissions:
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      # Download the musl binary built by build-musl into the Docker build context.
-      - uses: actions/download-artifact@v4
-        with:
-          name: gitprint-musl
-      - run: chmod +x gitprint
 
       - uses: docker/setup-buildx-action@v3
 
@@ -87,13 +50,16 @@ jobs:
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
-      # Docker build is now just: apk add git + COPY pre-built binary (~30 sec).
+      # GHA layer cache: deps layer is restored from cache on warm runs so only
+      # the gitprint source layer needs to rebuild (~1-2 min instead of 6+ min).
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   benchmark:
     runs-on: ubuntu-latest
