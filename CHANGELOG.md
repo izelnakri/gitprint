@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.17] - 2026-03-03
+[`v0.3.16...v0.3.17`](https://github.com/izelnakri/gitprint/compare/v0.3.16...v0.3.17)
+
+### Bug Fixes
+- Use pre-built lukemathwalker/cargo-chef image instead of cargo install — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`5c11f34`](https://github.com/izelnakri/gitprint/commit/5c11f3486bf3e9be6b2fecbba865bab8594a7007))
+
+### Performance
+- Use cargo-chef + pinned Rust in Dockerfile for reliable layer caching — 2026-03-03 by [@izelnakri](https://github.com/izelnakri) ([`9244eb0`](https://github.com/izelnakri/gitprint/commit/9244eb04f15bb12535cd85134cf3048f83c7a52f))
+
 ## [0.3.16] - 2026-03-03
 [`v0.3.15...v0.3.16`](https://github.com/izelnakri/gitprint/compare/v0.3.15...v0.3.16)
 
