@@ -35,7 +35,7 @@ jobs:
   # ── Binary ───────────────────────────────────────────────────────────────────
   # Compiles a musl release binary in parallel with lint/test. Uses thin LTO
   # (acceptable for nightly; fat LTO is reserved for shipped release binaries).
-  # The package job downloads this artifact instead of recompiling inside Docker.
+  # The package and pages jobs download this artifact instead of recompiling.
   build:
     runs-on: ubuntu-latest
     steps:
@@ -62,6 +62,11 @@ jobs:
   # ── Docker image ─────────────────────────────────────────────────────────────
   # Downloads the pre-built musl binary from the build job and copies it into
   # Alpine via --target prebuilt — no Rust compilation inside Docker.
+  #
+  # Push policy:
+  #   - main branch  → ghcr.io/.../gitprint:nightly + sha-<hash>
+  #   - other branches / same-repo PRs → ghcr.io/.../gitprint:<branch> or pr-<n>
+  #   - fork PRs → build only, no push (fork tokens lack GHCR write access)
   package:
     needs: [lint, test, build]
     runs-on: ubuntu-latest
@@ -72,21 +77,29 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Login is only needed when actually pushing (main branch pushes).
+      # Login is skipped for fork PRs — their GITHUB_TOKEN cannot write to the
+      # upstream registry. Same-repo PRs and all push events have write access.
       - uses: docker/login-action@v3
-        if: github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derive image tags: PRs get a sha label only; main gets `nightly` + sha.
+      # Tags:
+      #   push to main  → nightly + sha-<hash>
+      #   push to branch → <branch-name> + sha-<hash>
+      #   same-repo PR   → pr-<number> + sha-<hash>
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,prefix=sha-,format=short
 
       - uses: actions/download-artifact@v4
@@ -100,9 +113,98 @@ jobs:
           context: dist
           file: Dockerfile
           target: prebuilt
-          push: ${{ github.ref == 'refs/heads/main' }}
+          push: >-
+            ${{
+              github.event_name == 'push' ||
+              github.event.pull_request.head.repo.full_name == github.repository
+            }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # ── Pages (main only) ────────────────────────────────────────────────────────
+  # Reuses the pre-built musl binary to generate the source PDF (skips
+  # cargo build --release), then builds rustdoc and deploys both to GitHub Pages.
+  # Runs only on main; concurrency guard cancels stale in-flight deployments.
+  pages:
+    if: github.ref == 'refs/heads/main'
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history required so git log reports accurate per-file dates.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Reuse the already-compiled musl binary — no cargo build --release needed.
+      - uses: actions/download-artifact@v4
+        with:
+          name: gitprint-linux-musl
+          path: dist
+      - run: tar xzf dist/gitprint-linux-musl.tar.gz -C dist && chmod +x dist/gitprint
+
+      - name: Generate PDF
+        run: ./dist/gitprint . --output gitprint.pdf
+
+      - name: Generate rustdoc
+        run: cargo doc --no-deps
+
+      - name: Assemble site
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p _site/docs
+          cp gitprint.pdf _site/gitprint.pdf
+          cp -r target/doc/. _site/docs/
+          touch _site/.nojekyll
+          cat > _site/index.html << HTMLEOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>gitprint — source PDF</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              html, body { height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #e6edf3; }
+              body { display: flex; flex-direction: column; }
+              header { flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
+              header h1 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+              header a { font-size: 13px; color: #8b949e; text-decoration: none; }
+              header a:hover { color: #e6edf3; }
+              embed { flex: 1; width: 100%; border: none; }
+            </style>
+          </head>
+          <body>
+            <header>
+              <h1>gitprint</h1>
+              <a href="https://github.com/${REPO}">source</a>
+              <a href="gitprint.pdf">download PDF</a>
+              <a href="docs/gitprint/index.html">API docs</a>
+            </header>
+            <embed src="gitprint.pdf" type="application/pdf">
+          </body>
+          </html>
+          HTMLEOF
+
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
 
   # ── Benchmarks (main only) ────────────────────────────────────────────────────
   # Run all benchmarks and record results as "current". No regression

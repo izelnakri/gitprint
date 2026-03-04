@@ -1,0 +1,31 @@
+name: Cleanup GHCR
+
+# Runs weekly and on demand. Deletes old container versions that are not
+# protected by a semver tag, `latest`, or `nightly`. This covers ephemeral
+# branch and PR images that accumulate over time.
+#
+# Protected tag regex: latest | nightly | X.Y.Z | X.Y
+# Everything else (sha-*, branch names, pr-*) is subject to deletion once
+# the number of unprotected versions exceeds min-versions-to-keep.
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'  # every Sunday at 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: gitprint
+          package-type: container
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Keep at least the 25 most-recent unprotected versions so in-flight
+          # branch images stay available for a reasonable window before deletion.
+          min-versions-to-keep: 25
+          # Never delete semver releases, latest, or the nightly image.
+          ignore-versions: '^(latest|nightly|\d+\.\d+(\.\d+)?)$'
