@@ -8,85 +8,110 @@ use crate::types::{ActivityFilter, PaperSize};
 #[command(
     name = "gitprint",
     about = "Convert git repositories into beautifully formatted PDFs",
+    long_about = "Convert git repositories into beautifully formatted PDFs.\n\
+                  \n\
+                  MODES\n\
+                  \n  \
+                  gitprint <PATH> [OPTIONS]\n    \
+                    Local path, file, or remote URL (https://, git@, ssh://) → PDF\n\
+                  \n  \
+                  gitprint --user <USERNAME> [OPTIONS]\n    \
+                    GitHub user activity report → PDF\n\
+                  \n  \
+                  gitprint <PATH|--user USERNAME> --preview\n    \
+                    Preview output in the terminal — no PDF generated",
     version,
     arg_required_else_help = true,
     after_help = after_help_text(),
 )]
 pub struct Args {
-    /// Path to a git repository, directory, file, or remote URL (https://, git@, ssh://)
+    /// Local path, file, or remote URL (https://, git@, ssh://)
     pub path: Option<String>,
 
-    /// GitHub username — generates a user activity report PDF instead of printing a repo
-    #[arg(short = 'u', long = "user")]
-    pub user: Option<String>,
+    /// Preview output in the terminal instead of generating a PDF
+    #[arg(long)]
+    pub preview: bool,
 
     /// Output PDF file path
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
+    // ── Repository Mode ────────────────────────────────────────────────────────
     /// Glob patterns for files to include (repeatable)
-    #[arg(long, action = clap::ArgAction::Append)]
+    #[arg(long, action = clap::ArgAction::Append, help_heading = "Repository Mode (Default)")]
     pub include: Vec<String>,
 
     /// Glob patterns for files to exclude (repeatable)
-    #[arg(long, action = clap::ArgAction::Append)]
+    #[arg(long, action = clap::ArgAction::Append, help_heading = "Repository Mode (Default)")]
     pub exclude: Vec<String>,
 
     /// Syntax highlighting theme
-    #[arg(long, default_value = "InspiredGitHub")]
+    #[arg(
+        long,
+        default_value = "InspiredGitHub",
+        help_heading = "Repository Mode (Default)"
+    )]
     pub theme: String,
 
     /// Code font size in points
-    #[arg(long, default_value_t = 8.0)]
+    #[arg(
+        long,
+        default_value_t = 8.0,
+        help_heading = "Repository Mode (Default)"
+    )]
     pub font_size: f64,
 
     /// Disable line numbers
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub no_line_numbers: bool,
 
     /// Disable table of contents
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub no_toc: bool,
 
     /// Disable directory tree visualization
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub no_file_tree: bool,
 
     /// Use a specific branch
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub branch: Option<String>,
 
     /// Use a specific commit
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub commit: Option<String>,
 
     /// Paper size
-    #[arg(long, value_enum, default_value_t = PaperSize::A4)]
+    #[arg(long, value_enum, default_value_t = PaperSize::A4, help_heading = "Repository Mode (Default)")]
     pub paper_size: PaperSize,
 
     /// Use landscape orientation
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub landscape: bool,
 
     /// List available syntax themes and exit
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub list_themes: bool,
 
     /// List version tags of the repository and exit
-    #[arg(long)]
+    #[arg(long, help_heading = "Repository Mode (Default)")]
     pub list_tags: bool,
 
-    // ── User-report flags (only meaningful with -u/--user) ─────────────────────
-    /// Number of most-recently-pushed repos to include in the user report [default: 5]
-    #[arg(long, default_value_t = 5)]
+    // ── User Report Mode ───────────────────────────────────────────────────────
+    /// GitHub username — generate a user activity report instead of printing a repo
+    #[arg(short = 'u', long = "user", help_heading = "User Report Mode")]
+    pub user: Option<String>,
+
+    /// Number of most-recently-pushed repos to include [default: 5]
+    #[arg(long, default_value_t = 5, help_heading = "User Report Mode")]
     pub last_repos: usize,
 
-    /// Number of recent commits with diffs to render in the user report [default: 5]
-    #[arg(long, default_value_t = 5)]
-    pub commits: usize,
+    /// Number of recent commits with diffs to render [default: 5]
+    #[arg(long, default_value_t = 5, help_heading = "User Report Mode")]
+    pub last_commits: usize,
 
-    /// Skip commit diff rendering in the user report (faster)
-    #[arg(long)]
+    /// Skip commit diff rendering (faster)
+    #[arg(long, help_heading = "User Report Mode")]
     pub no_diffs: bool,
 
     /// Show events from this date forward [default: no lower bound; GitHub keeps ≤ 90 days]
@@ -96,27 +121,27 @@ pub struct Args {
     ///   Keywords    today · yesterday
     ///   Named       last week · last month · last year
     ///   Relative    30 days ago · 2 weeks ago · 1 month ago · 1 year ago
-    #[arg(long, value_name = "DATE")]
+    #[arg(long, value_name = "DATE", help_heading = "User Report Mode")]
     pub since: Option<String>,
 
     /// Show events up to and including this date [default: no upper bound]
     ///
     /// Same formats as --since.
-    #[arg(long, value_name = "DATE")]
+    #[arg(long, value_name = "DATE", help_heading = "User Report Mode")]
     pub until: Option<String>,
 
     /// Event types to include in the activity feed [default: all]
     ///
     /// all     — every public event (pushes, PRs, issues, stars, forks, …)
     /// commits — push events only
-    #[arg(long, value_enum, default_value_t = ActivityFilter::All)]
+    #[arg(long, value_enum, default_value_t = ActivityFilter::All, help_heading = "User Report Mode")]
     pub activity: ActivityFilter,
 
     /// Maximum events shown in the activity feed [default: 30]
     ///
     /// Fetches up to 100 events from GitHub and applies --since/--until/--activity
     /// filters before counting toward this limit.
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = 30, help_heading = "User Report Mode")]
     pub events: usize,
 }
 
@@ -151,7 +176,6 @@ mod tests {
 
     #[test]
     fn requires_path_or_user() {
-        // No args → clap triggers arg_required_else_help, parsing fails
         assert!(Args::try_parse_from(["gitprint"]).is_err());
     }
 
@@ -203,7 +227,7 @@ mod tests {
     fn user_report_flags_defaults() {
         let args = Args::parse_from(["gitprint", "-u", "alice"]);
         assert_eq!(args.last_repos, 5);
-        assert_eq!(args.commits, 5);
+        assert_eq!(args.last_commits, 5);
         assert!(!args.no_diffs);
         assert_eq!(args.events, 30);
         assert!(matches!(args.activity, ActivityFilter::All));
@@ -244,8 +268,15 @@ mod tests {
 
     #[test]
     fn user_report_flags_custom() {
-        let args = Args::parse_from(["gitprint", "-u", "alice", "--commits", "3", "--no-diffs"]);
-        assert_eq!(args.commits, 3);
+        let args = Args::parse_from([
+            "gitprint",
+            "-u",
+            "alice",
+            "--last-commits",
+            "3",
+            "--no-diffs",
+        ]);
+        assert_eq!(args.last_commits, 3);
         assert!(args.no_diffs);
     }
 
@@ -337,5 +368,20 @@ mod tests {
     fn font_size_custom() {
         let args = Args::parse_from(["gitprint", ".", "--font-size", "12.5"]);
         assert_eq!(args.font_size, 12.5);
+    }
+
+    #[test]
+    fn preview_flag() {
+        let args = Args::parse_from(["gitprint", ".", "--preview"]);
+        assert!(args.preview);
+        let args = Args::parse_from(["gitprint", "."]);
+        assert!(!args.preview);
+    }
+
+    #[test]
+    fn preview_with_user() {
+        let args = Args::parse_from(["gitprint", "-u", "alice", "--preview"]);
+        assert!(args.preview);
+        assert_eq!(args.user, Some("alice".to_string()));
     }
 }

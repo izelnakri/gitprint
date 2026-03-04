@@ -126,7 +126,6 @@ async fn main() {
             .output
             .unwrap_or_else(|| PathBuf::from(format!("{username}.pdf")));
 
-        // Parse date range flags — exit early with a clear message on bad input.
         let since = match args.since.as_deref().map(parse_date_filter) {
             Some(Err(e)) => {
                 eprintln!("error: --since: {e}");
@@ -147,7 +146,7 @@ async fn main() {
             paper_size: args.paper_size,
             landscape: args.landscape,
             last_repos: args.last_repos,
-            commits: args.commits,
+            last_commits: args.last_commits,
             no_diffs: args.no_diffs,
             font_size: args.font_size,
             github_token: std::env::var("GITHUB_TOKEN").ok(),
@@ -158,7 +157,12 @@ async fn main() {
             username,
         };
 
-        if let Err(e) = gitprint::user_report::run(&config).await {
+        let result = if args.preview {
+            gitprint::preview::user(&config).await
+        } else {
+            gitprint::user_report::run(&config).await
+        };
+        if let Err(e) = result {
             eprintln!("error: {e:#}");
             std::process::exit(1);
         }
@@ -254,7 +258,12 @@ async fn main() {
         remote_url: is_remote.then(|| path.clone()),
     };
 
-    if let Err(e) = gitprint::run(&config).await {
+    let result = if args.preview {
+        gitprint::preview::repo(&config).await
+    } else {
+        gitprint::run(&config).await
+    };
+    if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
     }

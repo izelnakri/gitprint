@@ -21,32 +21,26 @@ pub(crate) struct UserReportData {
     pub commit_details: Vec<(String, CommitDetail)>,
 }
 
-/// Runs the full user report pipeline and writes a PDF to `config.output_path`.
-pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
-    let start = std::time::Instant::now();
+/// Fetches all GitHub data for the user report (Phases 1 & 2).
+///
+/// Separated from [`run`] so that [`crate::preview`] can reuse the same fetch
+/// logic without triggering PDF rendering.
+pub(crate) async fn fetch_data(config: &UserReportConfig) -> anyhow::Result<UserReportData> {
     let token = config.github_token.as_deref();
     let username = &config.username;
 
-    eprintln!("Fetching GitHub data for @{username}...");
-
     // ── Phase 1: parallel API fetches ─────────────────────────────────────────
-    // search_user_commits returns the N most recent commits across ALL public repos,
-    // regardless of push type (force push, rebase, etc.). It drives both the commit
-    // diffs section and the per-SHA message enrichment in the activity/repos renderers.
     let (user_res, starred_res, active_res, pushed_res, events_res, search_commits_res) = tokio::join!(
         github::get_user(username, token),
         github::get_user_starred_repos(username, 5, token),
         github::get_user_repos(username, "updated", 5, token),
         github::get_user_repos(username, "pushed", config.last_repos, token),
-        // Fetch up to 100 events (GitHub API max per page) so date/activity
-        // filters have the most events to work with before the display limit is applied.
         github::get_user_events(username, 100, token),
-        // Skip the search if diffs are disabled or not requested.
         async {
-            if config.no_diffs || config.commits == 0 {
+            if config.no_diffs || config.last_commits == 0 {
                 Ok(vec![])
             } else {
-                github::search_user_commits(username, config.commits, token).await
+                github::search_user_commits(username, config.last_commits, token).await
             }
         },
     );
@@ -54,19 +48,13 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
     let user = user_res?;
     let starred_repos = starred_res.unwrap_or_default();
 
-    // Coalesce duplicate push events first, then apply user-specified filters.
     let events = {
         let raw = coalesce_push_events(events_res.unwrap_or_default());
-
-        // Date range filter — ISO 8601 strings sort lexicographically, so simple
-        // string comparison is correct for YYYY-MM-DD prefixes.
         let date_filtered = raw.into_iter().filter(|e| {
             let date = e.created_at.get(..10).unwrap_or(&e.created_at);
             config.since.as_deref().is_none_or(|s| date >= s)
                 && config.until.as_deref().is_none_or(|u| date <= u)
         });
-
-        // Activity type filter.
         match config.activity {
             ActivityFilter::All => date_filtered.collect::<Vec<_>>(),
             ActivityFilter::Commits => date_filtered
@@ -75,8 +63,6 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         }
     };
 
-    // Build repo-name sets from the user's own event feed — these are definitively
-    // the user's own actions, not collaborator or bot activity.
     let push_event_repos: std::collections::HashSet<String> = events
         .iter()
         .filter(|e| e.kind == "PushEvent")
@@ -88,9 +74,6 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         .map(|e| e.repo.name.clone())
         .collect();
 
-    // "Recently Pushed" = repos the user personally pushed code to.
-    // Filter by push events so collaborator/bot pushes to owned repos are excluded.
-    // Fall back to unfiltered if the event window is empty (new account / no events).
     let pushed_repos: Vec<_> = pushed_res
         .unwrap_or_default()
         .into_iter()
@@ -99,9 +82,6 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         })
         .collect();
 
-    // "Recently Active" = repos where the user did something *other* than pushing code
-    // (opened issues, reviewed PRs, left comments, starred, etc.).
-    // Excludes repos already shown in "Recently Pushed" to avoid duplicates.
     let pushed_names: std::collections::HashSet<&str> =
         pushed_repos.iter().map(|r| r.full_name.as_str()).collect();
     let active_repos: Vec<_> = active_res
@@ -114,16 +94,9 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         })
         .collect();
 
-    // Total stars across all owned (non-fork) repos — use the starred list which
-    // already gives us the top repos; for a rough total we sum what we have.
     let total_stars: u64 = starred_repos.iter().map(|r| r.stargazers_count).sum();
 
     // ── Phase 2: fetch commit details in parallel ──────────────────────────────
-    // SHA → first-line-of-message lookup built from the search API results.
-    // Keyed by commit SHA so each push event's HEAD can be enriched individually,
-    // preventing the same messages from appearing across multiple push events.
-    // Propagate rate-limit errors so the user sees an actionable message; for
-    // other transient failures degrade gracefully to an empty commit list.
     let search_commits = match search_commits_res {
         Ok(commits) => commits,
         Err(e) if e.to_string().contains("rate limit") => return Err(e),
@@ -134,7 +107,8 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         .map(|(_, sha, msg)| (sha.clone(), msg.clone()))
         .collect();
 
-    let commit_details: Vec<(String, CommitDetail)> = if !config.no_diffs && config.commits > 0 {
+    let commit_details: Vec<(String, CommitDetail)> = if !config.no_diffs && config.last_commits > 0
+    {
         let shas: Vec<(String, String)> = search_commits
             .into_iter()
             .map(|(repo, sha, _)| (repo, sha))
@@ -149,7 +123,6 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
                     .map(|cd| (repo, cd))
             });
         });
-        // Propagate rate-limit errors; silently drop other per-commit failures (e.g. 404).
         let mut details: Vec<(String, CommitDetail)> = set
             .join_all()
             .await
@@ -160,16 +133,13 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
                 Err(_) => None,
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
-        // Sort newest-first so displayed messages are in chronological order.
         details.sort_unstable_by(|(_, a), (_, b)| b.commit.author.date.cmp(&a.commit.author.date));
         details
     } else {
         vec![]
     };
 
-    // ── Phase 3: PDF assembly (sequential) ────────────────────────────────────
-    eprintln!("Rendering PDF...");
-    let data = UserReportData {
+    Ok(UserReportData {
         user,
         total_stars,
         starred_repos,
@@ -178,7 +148,17 @@ pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
         events,
         commit_msgs,
         commit_details,
-    };
+    })
+}
+
+/// Runs the full user report pipeline and writes a PDF to `config.output_path`.
+pub async fn run(config: &UserReportConfig) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+
+    eprintln!("Fetching GitHub data for @{}...", config.username);
+    let data = fetch_data(config).await?;
+
+    eprintln!("Rendering PDF...");
     let (doc, total_pages) = render_to_doc(config, &data)?;
     pdf::save_pdf(&doc, &config.output_path).await?;
 
@@ -409,7 +389,7 @@ mod tests {
             paper_size: PaperSize::A4,
             landscape: false,
             last_repos: 0,
-            commits,
+            last_commits: commits,
             no_diffs: false,
             font_size: 8.0,
             github_token: None,
@@ -467,7 +447,7 @@ mod tests {
     }
 
     /// More commits with large diffs must produce more PDF pages than zero commits.
-    /// This verifies the `--commits` flag actually drives the diff render path.
+    /// This verifies the `--last-commits` flag actually drives the diff render path.
     #[test]
     fn more_commits_yields_more_pages() {
         let (_, pages_baseline) = render_to_doc(&mock_config(0), &empty_report_data()).unwrap();

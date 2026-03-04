@@ -12,6 +12,7 @@ pub mod git;
 pub mod github;
 pub mod highlight;
 pub mod pdf;
+pub mod preview;
 pub mod types;
 pub mod user_report;
 
@@ -32,7 +33,7 @@ struct ProcessedFile {
     last_modified: String,
 }
 
-fn format_size(bytes: u64) -> String {
+pub(crate) fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
@@ -45,7 +46,7 @@ fn format_size(bytes: u64) -> String {
 /// Formats the current UTC time as `YYYY-MM-DD HH:MM:SS UTC`.
 ///
 /// Uses Howard Hinnant's Euclidean Gregorian algorithm — no external crate needed.
-fn format_utc_now() -> String {
+pub(crate) fn format_utc_now() -> String {
     let total_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

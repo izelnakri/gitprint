@@ -19,7 +19,7 @@ pub struct UserReportConfig {
     /// Number of most-recently-pushed repos to include (0 = skip section).
     pub last_repos: usize,
     /// Number of recent commits with diffs to render (0 = skip diffs).
-    pub commits: usize,
+    pub last_commits: usize,
     /// Skip diff rendering entirely.
     pub no_diffs: bool,
     /// Font size used for diff/code blocks.

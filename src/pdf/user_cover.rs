@@ -202,7 +202,7 @@ mod tests {
             paper_size: crate::types::PaperSize::A4,
             landscape: false,
             last_repos: 5,
-            commits: 5,
+            last_commits: 5,
             no_diffs: false,
             font_size: 8.0,
             github_token: None,
