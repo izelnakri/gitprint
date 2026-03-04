@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.21] - 2026-03-04
+[`v0.3.20...v0.3.21`](https://github.com/izelnakri/gitprint/compare/v0.3.20...v0.3.21)
+
+### Performance
+- Improve CI by caching musl for cargo release — 2026-03-04 by [@izelnakri](https://github.com/izelnakri) ([`b4a976b`](https://github.com/izelnakri/gitprint/commit/b4a976b29babda9a9a9e4d83ed570cea5dcd0bb6))
+
 ## [0.3.20] - 2026-03-03
 [`v0.3.19...v0.3.20`](https://github.com/izelnakri/gitprint/compare/v0.3.19...v0.3.20)
 
