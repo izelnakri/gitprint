@@ -142,16 +142,22 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      # Deps layer is already cached from CI runs on main — release builds
-      # only recompile gitprint itself (~30 s).
+      # Download the already-compiled musl binary from the build job — no recompilation needed.
+      - uses: actions/download-artifact@v4
+        with:
+          name: gitprint-x86_64-unknown-linux-musl
+          path: dist
+      - run: tar xzf dist/gitprint-x86_64-unknown-linux-musl.tar.gz -C dist
+
+      # Target the prebuilt stage: copies the binary into Alpine, skips all compile stages.
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: dist
+          file: Dockerfile
+          target: prebuilt
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   # ── Publish ──────────────────────────────────────────────────────────────────
   publish:

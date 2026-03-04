@@ -30,6 +30,15 @@ RUN CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
     cargo build --release
 
+# Pre-built stage: copies an already-compiled musl binary from the build context.
+# Used by release.yml with --target prebuilt and context pointing at the extracted
+# artifact directory — skips all compilation stages entirely.
+FROM alpine:latest AS prebuilt
+RUN apk add --no-cache git
+COPY gitprint /usr/local/bin/gitprint
+ENTRYPOINT ["gitprint"]
+
+# Default stage: compiled from source via the builder above.
 FROM alpine:latest
 RUN apk add --no-cache git
 COPY --from=builder /app/target/release/gitprint /usr/local/bin/gitprint

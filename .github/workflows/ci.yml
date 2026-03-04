@@ -66,16 +66,16 @@ jobs:
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
-      # GHA layer cache: deps layer is restored from cache on warm runs so only
-      # the gitprint source layer needs to rebuild (~30 s instead of 6+ min).
+      # Registry layer cache: faster and more reliable than type=gha (no 10 GB eviction
+      # cap, uses chunked registry protocol). Cache writes only on main where login runs.
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=registry,ref=ghcr.io/{0}:buildcache,mode=max', github.repository) || '' }}
 
   # ── Benchmarks (main only) ────────────────────────────────────────────────────
   # Run all benchmarks and record results as "current". No regression
