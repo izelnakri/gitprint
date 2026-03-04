@@ -37,7 +37,11 @@ Modules:
 ## Conventions
 
 - Edition 2024
-- Error handling: anyhow for ergonomic error propagation throughout
-- Tests: inline `#[cfg(test)] mod tests` for unit tests, `tests/` directory for integration tests
+- Error handling: anyhow for ergonomic error propagation throughout. Always try to use `?` instead of `.unwrap()`, if
+it is possible.
+- Have flat `if` checks if performance characteristics are same between 2 possible control flows.
+- Tests: inline `#[cfg(test)] mod tests` for unit tests, `tests/` directory for integration tests. Make sure each feature
+is well covered with tests.
 - Integration tests use `tempfile` crate to create temporary git repos
-- No unsafe code
+- No unsafe code, if not needed.
+- Code has to be always readable. Priorities are: Performance > Scalability > Readability > Maintainance
