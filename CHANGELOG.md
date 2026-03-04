@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-03-04
+[`v0.3.23...v0.4.0`](https://github.com/izelnakri/gitprint/compare/v0.3.23...v0.4.0)
+
+### Features
+- --preview mode!! — 2026-03-04 by [@izelnakri](https://github.com/izelnakri) ([`82eb371`](https://github.com/izelnakri/gitprint/commit/82eb37114e72d1c1b243db029d2856d8c8908c32))
+
 ## [0.3.23] - 2026-03-04
 [`v0.3.21...v0.3.23`](https://github.com/izelnakri/gitprint/compare/v0.3.21...v0.3.23)
 
