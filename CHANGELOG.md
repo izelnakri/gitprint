@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.23] - 2026-03-04
+[`v0.3.21...v0.3.23`](https://github.com/izelnakri/gitprint/compare/v0.3.21...v0.3.23)
+
+### Bug Fixes
+- V0.3.22 already exists — 2026-03-04 by [@izelnakri](https://github.com/izelnakri) ([`0184026`](https://github.com/izelnakri/gitprint/commit/018402647ed2db1335f7a105b1f30132969f00f9))
+
 ## [0.3.21] - 2026-03-04
 [`v0.3.20...v0.3.21`](https://github.com/izelnakri/gitprint/compare/v0.3.20...v0.3.21)
 
