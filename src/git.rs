@@ -38,12 +38,21 @@ pub fn repo_name_from_url(url: &str) -> String {
 pub struct TempCloneDir(PathBuf);
 
 impl TempCloneDir {
-    pub async fn new() -> anyhow::Result<Self> {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("gitprint-{nanos}"));
+    /// Creates (or reuses) a deterministically-named temp dir based on the URL,
+    /// branch, and commit so repeated invocations for the same target don't
+    /// accumulate stale copies in `/tmp`.
+    pub async fn for_url(
+        url: &str,
+        branch: Option<&str>,
+        commit: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        url.hash(&mut h);
+        branch.hash(&mut h);
+        commit.hash(&mut h);
+        let dir = std::env::temp_dir().join(format!("gitprint-{:016x}", h.finish()));
         tokio::fs::create_dir_all(&dir).await?;
         Ok(Self(dir))
     }
@@ -835,7 +844,9 @@ mod tests {
     #[tokio::test]
     async fn temp_clone_dir_creates_and_cleans_up() {
         let path = {
-            let t = TempCloneDir::new().await.unwrap();
+            let t = TempCloneDir::for_url("https://example.com/repo", None, None)
+                .await
+                .unwrap();
             let p = t.path().to_path_buf();
             assert!(p.exists());
             p

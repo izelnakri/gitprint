@@ -97,6 +97,10 @@ pub struct Args {
     #[arg(long, help_heading = "Repository Mode (Default)")]
     pub list_tags: bool,
 
+    /// Open the repository in Neovim instead of generating a PDF
+    #[arg(long, help_heading = "Repository Mode (Default)")]
+    pub nvim: bool,
+
     // ── User Report Mode ───────────────────────────────────────────────────────
     /// GitHub username — generate a user activity report instead of printing a repo
     #[arg(short = 'u', long = "user", help_heading = "User Report Mode")]
