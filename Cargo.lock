@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "gitprint"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "anyhow",
  "clap",
