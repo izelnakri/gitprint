@@ -8,6 +8,8 @@
 
 Convert git repositories into beautifully formatted, printer-friendly PDFs — or preview them directly in the terminal.
 
+![gitprint demo](demo/demo.gif)
+
 ## Features
 
 - Syntax-highlighted source code with 100+ languages supported

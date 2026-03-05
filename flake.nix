@@ -81,6 +81,7 @@
             pkgs.git-cliff
             pkgs.cargo-release
             pkgs.cargo-nextest
+            pkgs.vhs
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";

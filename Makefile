@@ -90,3 +90,7 @@ release:
 		;; \
 		*) printf "Aborted.\n"; kill $$BENCH_PID 2>/dev/null; rm -f /tmp/gitprint-bench.log; exit 1 ;; \
 	esac
+
+demo:
+	vhs demo/demo.tape
+
