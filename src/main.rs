@@ -182,7 +182,6 @@ async fn main() {
 
     // Clone remote URL to a temp dir; hold it alive until after run().
     let temp_dir = if is_remote {
-        eprintln!("Cloning {path}...");
         match gitprint::git::TempCloneDir::for_url(
             &path,
             args.branch.as_deref(),
@@ -191,16 +190,21 @@ async fn main() {
         .await
         {
             Ok(t) => {
-                if let Err(e) = gitprint::git::clone_repo(
-                    &path,
-                    t.path(),
-                    args.branch.as_deref(),
-                    args.commit.as_deref(),
-                )
-                .await
-                {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
+                if t.path().join(".git").exists() {
+                    eprintln!("Reusing cached clone at {}", t.path().display());
+                } else {
+                    eprintln!("Cloning {path}...");
+                    if let Err(e) = gitprint::git::clone_repo(
+                        &path,
+                        t.path(),
+                        args.branch.as_deref(),
+                        args.commit.as_deref(),
+                    )
+                    .await
+                    {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
                 }
                 Some(t)
             }
