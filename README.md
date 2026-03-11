@@ -1,3 +1,5 @@
+<div align="center">
+
 # gitprint
 
 [![CI](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml/badge.svg)](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml)
@@ -5,6 +7,8 @@
 [![Downloads](https://img.shields.io/crates/d/gitprint)](https://crates.io/crates/gitprint)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://izelnakri.github.io/gitprint/docs/gitprint/)
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-pink)](https://github.com/sponsors/izelnakri)
+
+</div>
 
 Convert git repositories into beautifully formatted, printer-friendly PDFs — or preview them directly in the terminal.
 
@@ -28,13 +32,24 @@ Convert git repositories into beautifully formatted, printer-friendly PDFs — o
 
 ## Installation
 
-### With Nix
+### cargo-binstall (recommended — downloads pre-built binary)
+
+```sh
+cargo binstall gitprint
+```
+
+### Pre-built binary
+
+Download the latest release for your platform from the
+[releases page](https://github.com/izelnakri/gitprint/releases).
+
+### Nix
 
 ```sh
 nix profile install github:izelnakri/gitprint
 ```
 
-### With Cargo
+### Build from source
 
 ```sh
 cargo install --git https://github.com/izelnakri/gitprint
