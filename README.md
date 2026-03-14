@@ -3,6 +3,7 @@
 # gitprint
 
 [![CI](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml/badge.svg)](https://github.com/izelnakri/gitprint/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/izelnakri/gitprint/graph/badge.svg)](https://codecov.io/gh/izelnakri/gitprint)
 [![Crate](https://img.shields.io/crates/v/gitprint)](https://crates.io/crates/gitprint)
 [![Downloads](https://img.shields.io/crates/d/gitprint)](https://crates.io/crates/gitprint)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://izelnakri.github.io/gitprint/docs/gitprint/)

@@ -3,7 +3,7 @@
 LEVEL ?= patch
 REGRESSION_THRESHOLD ?= 20
 
-.PHONY: help fix check fmt test build doc bench-baseline bench-check release
+.PHONY: help fix check fmt test build doc bench-baseline bench-check release coverage
 
 help:
 	@echo "Usage: make <target> [LEVEL=patch|minor|major] [REGRESSION_THRESHOLD=20]"
@@ -16,6 +16,7 @@ help:
 	@echo "  doc             Build and open API documentation"
 	@echo "  bench-baseline  Establish (or reset) the local benchmark baseline"
 	@echo "  bench-check     Run benchmarks and report regressions vs baseline"
+	@echo "  coverage        Run tests with coverage and fail if line coverage < 85%"
 	@echo "  release         Preview changelog, confirm, then generate CHANGELOG and publish (LEVEL=patch)"
 
 fix:
@@ -53,6 +54,9 @@ bench-check:
 	@echo "=== Benchmark regression check (threshold: $(REGRESSION_THRESHOLD)%) ==="
 	cargo bench --bench pipeline -- --save-baseline current
 	REGRESSION_THRESHOLD=$(REGRESSION_THRESHOLD) python3 scripts/check_benchmarks.py
+
+coverage:
+	@cargo nextest --version >/dev/null 2>&1 && cargo llvm-cov nextest --html --open --fail-under-lines 85 || cargo llvm-cov --html --open --fail-under-lines 85
 
 # Benchmarks run in the background while the developer reads the changelog
 # preview — reading time is free CPU time. Results are checked after the

@@ -458,3 +458,56 @@ async fn read_text_file(repo_path: &Path, path: &Path, config: &Config) -> Optio
         .filter(|c| !filter::is_binary(c.as_bytes()))
         .filter(|c| !filter::is_minified(c))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 2), "2.0 MB");
+    }
+
+    #[test]
+    fn format_elapsed_milliseconds() {
+        assert_eq!(format_elapsed(std::time::Duration::from_millis(0)), "0ms");
+        assert_eq!(
+            format_elapsed(std::time::Duration::from_millis(999)),
+            "999ms"
+        );
+    }
+
+    #[test]
+    fn format_elapsed_seconds() {
+        assert_eq!(
+            format_elapsed(std::time::Duration::from_millis(1500)),
+            "1.5s"
+        );
+        assert_eq!(format_elapsed(std::time::Duration::from_secs(2)), "2.0s");
+    }
+
+    #[test]
+    fn format_utc_now_has_correct_format() {
+        let s = format_utc_now();
+        assert!(s.ends_with(" UTC"), "got: {s}");
+        assert_eq!(s.len(), 23, "got: {s}"); // "YYYY-MM-DD HH:MM:SS UTC"
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[7..8], "-");
+        assert_eq!(&s[13..14], ":");
+        assert_eq!(&s[16..17], ":");
+    }
+}

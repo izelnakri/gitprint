@@ -326,6 +326,92 @@ mod tests {
     }
 
     #[test]
+    fn format_size_bytes() {
+        assert_eq!(super::format_size(0), "0 B");
+        assert_eq!(super::format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(super::format_size(1024), "1.0 KB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(super::format_size(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn elapsed_str_milliseconds() {
+        assert_eq!(
+            super::elapsed_str(std::time::Duration::from_millis(42)),
+            "42ms"
+        );
+        assert_eq!(
+            super::elapsed_str(std::time::Duration::from_millis(999)),
+            "999ms"
+        );
+    }
+
+    #[test]
+    fn elapsed_str_seconds() {
+        assert_eq!(
+            super::elapsed_str(std::time::Duration::from_millis(1500)),
+            "1.5s"
+        );
+    }
+
+    #[test]
+    fn render_repos_section_empty_is_noop() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = crate::pdf::fonts::load_fonts(&mut doc).unwrap();
+        let uc = mock_config(0);
+        let mut builder = crate::pdf::create_user_builder(&uc, fonts);
+        let page_before = builder.current_page();
+        super::render_repos_section(
+            &mut builder,
+            "title",
+            &[],
+            5,
+            &[],
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(builder.current_page(), page_before);
+    }
+
+    #[test]
+    fn render_repos_section_zero_limit_is_noop() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = crate::pdf::fonts::load_fonts(&mut doc).unwrap();
+        let uc = mock_config(0);
+        let mut builder = crate::pdf::create_user_builder(&uc, fonts);
+        let page_before = builder.current_page();
+        super::render_repos_section(
+            &mut builder,
+            "title",
+            &[crate::github::GitHubRepo {
+                name: "x".into(),
+                full_name: "a/x".into(),
+                html_url: "https://github.com/a/x".into(),
+                description: None,
+                language: None,
+                stargazers_count: 0,
+                forks_count: 0,
+                open_issues_count: 0,
+                size: 0,
+                pushed_at: None,
+                updated_at: None,
+                created_at: None,
+                fork: false,
+            }],
+            0,
+            &[],
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(builder.current_page(), page_before);
+    }
+
+    #[test]
     fn coalesce_keeps_first_push_per_day_branch() {
         let events = vec![
             make_push_event("alice/a"),

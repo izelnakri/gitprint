@@ -20,7 +20,7 @@
         # Pin to the exact version declared in rust-toolchain.toml — same as CI.
         # Dev shell adds rust-src + rust-analyzer on top for IDE support.
         rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
-          extensions = [ "rust-src" "rust-analyzer" ];
+          extensions = [ "rust-src" "rust-analyzer" "llvm-tools-preview" ];
         };
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
@@ -81,6 +81,7 @@
             pkgs.git-cliff
             pkgs.cargo-release
             pkgs.cargo-nextest
+            pkgs.cargo-llvm-cov
             pkgs.vhs
           ];
 

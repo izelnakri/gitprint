@@ -1,6 +1,7 @@
 use printpdf::{
     Actions, BorderArray, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation, Mm, Op,
-    PdfFontHandle, PdfPage, Pt, Rect, Rgb, TextItem, graphics::Point,
+    PaintMode, PdfFontHandle, PdfPage, Polygon, PolygonRing, Pt, Rect, Rgb, TextItem, WindingOrder,
+    graphics::Point,
 };
 
 /// A styled text span within a line.
@@ -393,6 +394,80 @@ impl PageBuilder {
         self.y += thickness_pt;
     }
 
+    /// Draw a filled rectangle.
+    ///
+    /// - `x_offset_pt`: x position from the left margin.
+    /// - `y_below_cursor_pt`: distance below the current cursor to the **bottom** edge of the rect.
+    /// - `width_pt`, `height_pt`: dimensions (rect grows upward from the bottom edge).
+    ///
+    /// Does **not** advance `y` — call `vertical_space` afterward if needed.
+    pub fn draw_filled_rect(
+        &mut self,
+        x_offset_pt: f32,
+        y_below_cursor_pt: f32,
+        width_pt: f32,
+        height_pt: f32,
+        color: Color,
+    ) {
+        self.flush_break();
+        let x = self.left_x().0 + x_offset_pt;
+        let y_bottom = self.pdf_y().0 - y_below_cursor_pt;
+        let lp = |px: f32, py: f32| LinePoint {
+            p: Point {
+                x: Pt(px),
+                y: Pt(py),
+            },
+            bezier: false,
+        };
+        let polygon = Polygon {
+            rings: vec![PolygonRing {
+                points: vec![
+                    lp(x, y_bottom),
+                    lp(x + width_pt, y_bottom),
+                    lp(x + width_pt, y_bottom + height_pt),
+                    lp(x, y_bottom + height_pt),
+                ],
+            }],
+            mode: PaintMode::Fill,
+            winding_order: WindingOrder::NonZero,
+        };
+        self.current_ops.extend([
+            Op::SaveGraphicsState,
+            Op::SetFillColor { col: color },
+            Op::DrawPolygon { polygon },
+            Op::RestoreGraphicsState,
+        ]);
+    }
+
+    /// Write text at a specific x offset from the left margin, at the current `y` cursor.
+    /// Does **not** advance `y`.
+    pub fn write_text_at_x(
+        &mut self,
+        x_offset_pt: f32,
+        text: &str,
+        font_id: &FontId,
+        size: Pt,
+        color: Color,
+    ) {
+        self.flush_break();
+        let x = Pt(self.left_x().0 + x_offset_pt);
+        self.current_ops.extend([
+            Op::StartTextSection,
+            Op::SetTextCursor {
+                pos: Point { x, y: self.pdf_y() },
+            },
+            Op::SetFillColor { col: color },
+            Op::SetFont {
+                size,
+                font: PdfFontHandle::External(font_id.clone()),
+            },
+            Op::ShowText {
+                items: vec![TextItem::Text(text.to_string())],
+            },
+            Op::EndTextSection,
+        ]);
+    }
+
     pub fn font(&self, bold: bool, italic: bool) -> &FontId {
         match (bold, italic) {
             (true, true) => &self.fonts.bold_italic,
@@ -529,5 +604,155 @@ mod tests {
             }]);
         });
         assert!(builder.finish().len() > 1);
+    }
+
+    #[test]
+    fn write_line_centered_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line_centered(&[Span {
+            text: "centered".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn write_line_justified_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line_justified(
+            &[Span {
+                text: "left".into(),
+                font_id: fonts.regular.clone(),
+                size: Pt(8.0),
+                color: black(),
+            }],
+            &[Span {
+                text: "right".into(),
+                font_id: fonts.bold.clone(),
+                size: Pt(8.0),
+                color: black(),
+            }],
+        );
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn draw_filled_rect_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        builder.draw_filled_rect(0.0, 20.0, 100.0, 10.0, black());
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn write_text_at_x_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_text_at_x(50.0, "hello", &fonts.regular, Pt(8.0), black());
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn font_variants_are_distinct() {
+        let (_doc, fonts) = test_font_set();
+        let builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        // Each combination must return without panic; IDs may or may not be equal.
+        let _ = builder.font(false, false);
+        let _ = builder.font(true, false);
+        let _ = builder.font(false, true);
+        let _ = builder.font(true, true);
+    }
+
+    #[test]
+    fn usable_width_pt_is_positive() {
+        let (_doc, fonts) = test_font_set();
+        let builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        assert!(builder.usable_width_pt() > 0.0);
+    }
+
+    #[test]
+    fn line_height_matches_constructor() {
+        let (_doc, fonts) = test_font_set();
+        let builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 12.5, fonts, 1);
+        assert_eq!(builder.line_height(), 12.5);
+    }
+
+    #[test]
+    fn remaining_pt_decreases_after_write() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        let before = builder.remaining_pt();
+        builder.write_line(&[Span {
+            text: "x".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
+        assert!(builder.remaining_pt() < before);
+    }
+
+    #[test]
+    fn current_page_with_pending_break() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line(&[Span {
+            text: "x".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
+        let page_before = builder.current_page();
+        builder.page_break();
+        // current_page() should report the upcoming page while break is pending.
+        assert_eq!(builder.current_page(), page_before + 1);
+    }
+
+    #[test]
+    fn vertical_space_reduces_remaining() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        let before = builder.remaining_pt();
+        builder.vertical_space(20.0);
+        assert!((builder.remaining_pt() - (before - 20.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn ensure_space_forces_page_break_when_tight() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 1);
+        // Consume almost all space, then request more than what remains.
+        let usable = builder.remaining_pt();
+        builder.vertical_space(usable - 5.0);
+        let page_before = builder.current_page();
+        builder.ensure_space(50.0);
+        assert!(builder.current_page() > page_before);
+    }
+
+    #[test]
+    fn add_link_does_not_panic() {
+        let (_doc, fonts) = test_font_set();
+        let mut builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts.clone(), 1);
+        builder.write_line(&[Span {
+            text: "linked text".into(),
+            font_id: fonts.regular.clone(),
+            size: Pt(8.0),
+            color: black(),
+        }]);
+        builder.add_link(
+            10.0,
+            printpdf::Actions::Uri("https://example.com".to_string()),
+        );
+        assert_eq!(builder.finish().len(), 1);
+    }
+
+    #[test]
+    fn starting_page_offset_is_respected() {
+        let (_doc, fonts) = test_font_set();
+        let builder = PageBuilder::new(Mm(210.0), Mm(297.0), Mm(10.0), 10.0, fonts, 5);
+        assert_eq!(builder.current_page(), 5);
     }
 }

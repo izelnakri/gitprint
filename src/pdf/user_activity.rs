@@ -422,6 +422,13 @@ mod tests {
             "IssuesEvent",
             "ReleaseEvent",
             "WatchEvent",
+            "IssueCommentEvent",
+            "PullRequestReviewEvent",
+            "PullRequestReviewCommentEvent",
+            "ForkEvent",
+            "CreateEvent",
+            "DeleteEvent",
+            "UnknownEvent",
         ]
         .iter()
         .for_each(|kind| {
@@ -434,6 +441,247 @@ mod tests {
                 created_at: "2024-01-01T00:00:00Z".to_string(),
             };
             assert!(!super::event_icon(&e).is_empty());
+            // icon color must not panic
+            let _ = super::event_icon_color(&e);
         });
+    }
+
+    fn make_event(kind: &str, payload: serde_json::Value) -> GitHubEvent {
+        GitHubEvent {
+            kind: kind.to_string(),
+            repo: crate::github::EventRepo {
+                name: "alice/repo".to_string(),
+            },
+            payload,
+            created_at: "2024-03-01T09:30:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn describe_issue_comment_event() {
+        let e = make_event(
+            "IssueCommentEvent",
+            serde_json::json!({ "issue": { "number": 7, "title": "Bug" } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("#7"));
+        assert!(d.main.contains("Bug"));
+    }
+
+    #[test]
+    fn describe_pr_review_event() {
+        let e = make_event(
+            "PullRequestReviewEvent",
+            serde_json::json!({ "review": { "state": "approved" }, "pull_request": { "number": 3 } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("Approved"));
+        assert!(d.main.contains("#3"));
+    }
+
+    #[test]
+    fn describe_pr_review_comment_event() {
+        let e = make_event(
+            "PullRequestReviewCommentEvent",
+            serde_json::json!({ "pull_request": { "number": 5 } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("#5"));
+    }
+
+    #[test]
+    fn describe_create_event_with_ref() {
+        let e = make_event(
+            "CreateEvent",
+            serde_json::json!({ "ref_type": "branch", "ref": "feature/x" }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("branch"));
+        assert!(d.main.contains("feature/x"));
+    }
+
+    #[test]
+    fn describe_create_event_no_ref() {
+        let e = make_event(
+            "CreateEvent",
+            serde_json::json!({ "ref_type": "repository", "ref": "" }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("repository"));
+        assert!(!d.main.contains("''"));
+    }
+
+    #[test]
+    fn describe_delete_event() {
+        let e = make_event(
+            "DeleteEvent",
+            serde_json::json!({ "ref_type": "branch", "ref": "old-feature" }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("old-feature"));
+    }
+
+    #[test]
+    fn describe_fork_event() {
+        let e = make_event(
+            "ForkEvent",
+            serde_json::json!({ "forkee": { "full_name": "bob/repo" } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("bob/repo"));
+    }
+
+    #[test]
+    fn describe_watch_event() {
+        let d = super::describe_event(&make_event("WatchEvent", serde_json::json!({})));
+        assert!(d.main.contains("Starred"));
+    }
+
+    #[test]
+    fn describe_release_event() {
+        let e = make_event(
+            "ReleaseEvent",
+            serde_json::json!({ "action": "published", "release": { "tag_name": "v1.2.3" } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("v1.2.3"));
+    }
+
+    #[test]
+    fn describe_commit_comment_event() {
+        let d = super::describe_event(&make_event("CommitCommentEvent", serde_json::json!({})));
+        assert!(d.main.contains("commit"));
+    }
+
+    #[test]
+    fn describe_gollum_event() {
+        let d = super::describe_event(&make_event("GollumEvent", serde_json::json!({})));
+        assert!(d.main.contains("wiki"));
+    }
+
+    #[test]
+    fn describe_member_event() {
+        let e = make_event(
+            "MemberEvent",
+            serde_json::json!({ "action": "added", "member": { "login": "bob" } }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("bob"));
+    }
+
+    #[test]
+    fn describe_public_event() {
+        let d = super::describe_event(&make_event("PublicEvent", serde_json::json!({})));
+        assert!(d.main.contains("public"));
+    }
+
+    #[test]
+    fn describe_unknown_event() {
+        let d = super::describe_event(&make_event("CoolNewEvent", serde_json::json!({})));
+        assert!(!d.main.is_empty());
+    }
+
+    #[test]
+    fn describe_pr_event_merged() {
+        let e = make_event(
+            "PullRequestEvent",
+            serde_json::json!({
+                "action": "closed",
+                "pull_request": {
+                    "number": 10, "title": "Big feature",
+                    "merged": true,
+                    "additions": 50, "deletions": 5, "changed_files": 3
+                }
+            }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("Merged"));
+        assert_eq!(d.detail.len(), 1);
+    }
+
+    #[test]
+    fn describe_push_event_no_size_field() {
+        // When "size" is absent, falls back to commits array length.
+        let e = make_event(
+            "PushEvent",
+            serde_json::json!({
+                "ref": "refs/heads/main",
+                "commits": [{ "message": "only commit" }]
+            }),
+        );
+        let d = super::describe_event(&e);
+        assert!(d.main.contains("1 commit"));
+    }
+
+    #[test]
+    fn event_url_push_without_head_uses_branch() {
+        let e = make_event("PushEvent", serde_json::json!({ "ref": "refs/heads/feat" }));
+        let url = super::event_url(&e).unwrap();
+        assert!(url.contains("feat"));
+    }
+
+    #[test]
+    fn event_url_pull_request_uses_html_url() {
+        let e = make_event(
+            "PullRequestEvent",
+            serde_json::json!({ "pull_request": { "html_url": "https://github.com/alice/repo/pull/1" } }),
+        );
+        assert_eq!(
+            super::event_url(&e),
+            Some("https://github.com/alice/repo/pull/1".to_string())
+        );
+    }
+
+    #[test]
+    fn event_url_issues_event() {
+        let e = make_event(
+            "IssuesEvent",
+            serde_json::json!({ "issue": { "html_url": "https://github.com/alice/repo/issues/2" } }),
+        );
+        assert_eq!(
+            super::event_url(&e),
+            Some("https://github.com/alice/repo/issues/2".to_string())
+        );
+    }
+
+    #[test]
+    fn event_url_fork_event() {
+        let e = make_event(
+            "ForkEvent",
+            serde_json::json!({ "forkee": { "html_url": "https://github.com/bob/repo" } }),
+        );
+        assert_eq!(
+            super::event_url(&e),
+            Some("https://github.com/bob/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn event_url_catchall_returns_repo_url() {
+        let url = super::event_url(&make_event("WatchEvent", serde_json::json!({}))).unwrap();
+        assert!(url.contains("alice/repo"));
+    }
+
+    #[test]
+    fn render_activity_many_event_types() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
+        let config = Config::test_default();
+        let mut builder = pdf::create_builder(&config, fonts);
+        let events: Vec<GitHubEvent> = [
+            "IssuesEvent",
+            "IssueCommentEvent",
+            "PullRequestReviewEvent",
+            "CreateEvent",
+            "DeleteEvent",
+            "ForkEvent",
+            "ReleaseEvent",
+            "WatchEvent",
+        ]
+        .iter()
+        .map(|kind| make_event(kind, serde_json::json!({})))
+        .collect();
+        super::render(&mut builder, &events, &std::collections::HashMap::new());
+        assert!(!builder.finish().is_empty());
     }
 }

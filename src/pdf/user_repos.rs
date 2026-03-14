@@ -381,4 +381,150 @@ mod tests {
         );
         assert!(!builder.finish().is_empty());
     }
+
+    #[test]
+    fn render_repos_push_event_no_commits_shows_branch() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
+        let config = Config::test_default();
+        let mut builder = pdf::create_builder(&config, fonts);
+        // Push with empty commits array — falls through to "pushed to {branch} on {date}" path.
+        let events = [test_push_event("alice/gitprint", "main", &[])];
+        super::render(
+            &mut builder,
+            "Pushed",
+            &[test_repo("gitprint", 100)],
+            &events,
+            &std::collections::HashMap::new(),
+        );
+        assert!(!builder.finish().is_empty());
+    }
+
+    fn make_event(repo: &str, kind: &str, payload: serde_json::Value) -> GitHubEvent {
+        use crate::github::EventRepo;
+        GitHubEvent {
+            kind: kind.to_string(),
+            repo: EventRepo {
+                name: repo.to_string(),
+            },
+            payload,
+            created_at: "2024-03-01T10:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn brief_activity_pr_open() {
+        let e = make_event(
+            "a/b",
+            "PullRequestEvent",
+            serde_json::json!({ "action": "opened", "pull_request": { "number": 5, "merged": false } }),
+        );
+        assert_eq!(super::brief_activity(&e), "opened PR #5");
+    }
+
+    #[test]
+    fn brief_activity_pr_merged() {
+        let e = make_event(
+            "a/b",
+            "PullRequestEvent",
+            serde_json::json!({ "action": "closed", "pull_request": { "number": 9, "merged": true } }),
+        );
+        assert_eq!(super::brief_activity(&e), "merged PR #9");
+    }
+
+    #[test]
+    fn brief_activity_issues_event() {
+        let e = make_event(
+            "a/b",
+            "IssuesEvent",
+            serde_json::json!({ "action": "opened", "issue": { "number": 3 } }),
+        );
+        assert_eq!(super::brief_activity(&e), "opened issue #3");
+    }
+
+    #[test]
+    fn brief_activity_issue_comment() {
+        let e = make_event(
+            "a/b",
+            "IssueCommentEvent",
+            serde_json::json!({ "issue": { "number": 7 } }),
+        );
+        assert_eq!(super::brief_activity(&e), "commented on issue #7");
+    }
+
+    #[test]
+    fn brief_activity_pr_review() {
+        let e = make_event(
+            "a/b",
+            "PullRequestReviewEvent",
+            serde_json::json!({ "pull_request": { "number": 2 } }),
+        );
+        assert_eq!(super::brief_activity(&e), "reviewed PR #2");
+    }
+
+    #[test]
+    fn brief_activity_watch() {
+        let e = make_event("a/b", "WatchEvent", serde_json::json!({}));
+        assert_eq!(super::brief_activity(&e), "starred");
+    }
+
+    #[test]
+    fn brief_activity_fork() {
+        let e = make_event("a/b", "ForkEvent", serde_json::json!({}));
+        assert_eq!(super::brief_activity(&e), "forked");
+    }
+
+    #[test]
+    fn brief_activity_release() {
+        let e = make_event(
+            "a/b",
+            "ReleaseEvent",
+            serde_json::json!({ "release": { "tag_name": "v2.0.0" } }),
+        );
+        assert_eq!(super::brief_activity(&e), "released v2.0.0");
+    }
+
+    #[test]
+    fn brief_activity_create_with_ref() {
+        let e = make_event(
+            "a/b",
+            "CreateEvent",
+            serde_json::json!({ "ref_type": "branch", "ref": "hotfix" }),
+        );
+        assert_eq!(super::brief_activity(&e), "created branch 'hotfix'");
+    }
+
+    #[test]
+    fn brief_activity_create_without_ref() {
+        let e = make_event(
+            "a/b",
+            "CreateEvent",
+            serde_json::json!({ "ref_type": "repository", "ref": "" }),
+        );
+        assert_eq!(super::brief_activity(&e), "created repository");
+    }
+
+    #[test]
+    fn brief_activity_unknown_event() {
+        let e = make_event("a/b", "SpookyEvent", serde_json::json!({}));
+        assert!(!super::brief_activity(&e).is_empty());
+    }
+
+    #[test]
+    fn render_repos_no_description() {
+        let mut doc = printpdf::PdfDocument::new("test");
+        let fonts = pdf::fonts::load_fonts(&mut doc).unwrap();
+        let config = Config::test_default();
+        let mut builder = pdf::create_builder(&config, fonts);
+        let mut repo = test_repo("nodesc", 10);
+        repo.description = None;
+        super::render(
+            &mut builder,
+            "Repos",
+            &[repo],
+            &[],
+            &std::collections::HashMap::new(),
+        );
+        assert!(!builder.finish().is_empty());
+    }
 }

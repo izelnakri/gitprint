@@ -18,19 +18,35 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets -- -D warnings
 
-  # ── Test ─────────────────────────────────────────────────────────────────────
-  # Runs in parallel with lint; nextest executes tests in parallel processes
-  # (~2× faster than cargo test on multi-core runners).
+  # ── Coverage ─────────────────────────────────────────────────────────────────
+  # Runs all tests (via cargo llvm-cov nextest) and fails if line coverage drops
+  # below 85%. Generates an HTML report uploaded as an artifact for the pages job.
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest
-      - run: cargo nextest run
+          tool: cargo-llvm-cov,nextest
+      - run: cargo llvm-cov nextest --lcov --output-path lcov.info --fail-under-lines 85
+      - run: cargo llvm-cov report --html
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 1
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # ── Binary ───────────────────────────────────────────────────────────────────
   # Compiles a musl release binary in parallel with lint/test. Uses thin LTO
@@ -155,6 +171,11 @@ jobs:
           path: dist
       - run: tar xzf dist/gitprint-linux-musl.tar.gz -C dist && chmod +x dist/gitprint
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report
+
       - name: Generate PDF
         run: ./dist/gitprint . --output gitprint.pdf
 
@@ -165,9 +186,10 @@ jobs:
         env:
           REPO: ${{ github.repository }}
         run: |
-          mkdir -p _site/docs
+          mkdir -p _site/docs _site/coverage
           cp gitprint.pdf _site/gitprint.pdf
           cp -r target/doc/. _site/docs/
+          cp -r coverage-report/. _site/coverage/
           touch _site/.nojekyll
           cat > _site/index.html << HTMLEOF
           <!DOCTYPE html>
@@ -193,6 +215,7 @@ jobs:
               <a href="https://github.com/${REPO}">source</a>
               <a href="gitprint.pdf">download PDF</a>
               <a href="docs/gitprint/index.html">API docs</a>
+              <a href="coverage/index.html">coverage</a>
             </header>
             <embed src="gitprint.pdf" type="application/pdf">
           </body>
