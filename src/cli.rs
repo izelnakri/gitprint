@@ -4,6 +4,7 @@ use clap::Parser;
 
 use crate::types::{ActivityFilter, PaperSize};
 
+/// Parsed command-line arguments for the `gitprint` binary.
 #[derive(Parser, Debug)]
 #[command(
     name = "gitprint",

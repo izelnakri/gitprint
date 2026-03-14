@@ -57,6 +57,7 @@ impl TempCloneDir {
         Ok(Self(dir))
     }
 
+    /// Returns the path to the temporary clone directory.
     pub fn path(&self) -> &Path {
         &self.0
     }
@@ -491,6 +492,7 @@ pub async fn file_last_modified(root: &Path, file: &Path, config: &Config, is_gi
     }
 }
 
+/// Reads the content of a single file, using `git show` for a specific revision or plain I/O otherwise.
 pub async fn read_file_content(
     repo_path: &Path,
     file_path: &Path,

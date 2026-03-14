@@ -1,3 +1,4 @@
+/// Default glob patterns excluded from PDF output (lock files, build artifacts, binaries, etc.).
 pub const DEFAULT_EXCLUDES: &[&str] = &[
     // Lock files
     "package-lock.json",

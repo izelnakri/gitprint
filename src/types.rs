@@ -10,6 +10,7 @@ pub enum ActivityFilter {
 }
 
 /// Configuration for a `gitprint user` run.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct UserReportConfig {
     pub username: String,
@@ -39,12 +40,16 @@ pub struct UserReportConfig {
 /// Paper size for PDF output.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PaperSize {
+    /// ISO A4 (210 × 297 mm).
     A4,
+    /// US Letter (215.9 × 279.4 mm).
     Letter,
+    /// US Legal (215.9 × 355.6 mm).
     Legal,
 }
 
 /// Configuration for a gitprint run.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct Config {
     pub repo_path: PathBuf,
@@ -87,6 +92,7 @@ impl Config {
 }
 
 /// Metadata extracted from a git repository.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct RepoMetadata {
     pub name: String,
@@ -121,6 +127,7 @@ pub struct RepoMetadata {
 }
 
 /// An RGB color value.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy)]
 pub struct RgbColor {
     pub r: u8,
@@ -129,6 +136,7 @@ pub struct RgbColor {
 }
 
 /// A single syntax-highlighted token with styling information.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct HighlightedToken {
     pub text: String,
@@ -138,6 +146,7 @@ pub struct HighlightedToken {
 }
 
 /// A line of syntax-highlighted tokens.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct HighlightedLine {
     pub line_number: usize,

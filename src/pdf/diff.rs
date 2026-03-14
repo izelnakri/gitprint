@@ -19,6 +19,7 @@ fn hunk_blue() -> Color {
     Color::Rgb(Rgb::new(0.34, 0.60, 0.96, None)) // #5799F5 — electric blue
 }
 
+/// Renders a single commit with its per-file diffs into the PDF.
 pub fn render_commit(
     builder: &mut PageBuilder,
     detail: &CommitDetail,

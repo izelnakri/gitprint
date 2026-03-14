@@ -35,6 +35,7 @@ fn word_wrap(text: &str, max_chars: usize) -> Vec<String> {
     lines
 }
 
+/// Renders the user report cover page with profile info, metadata table, and footer.
 pub fn render(builder: &mut PageBuilder, user: &GitHubUser, total_stars: u64) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();

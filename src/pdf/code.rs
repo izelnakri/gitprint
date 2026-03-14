@@ -3,6 +3,7 @@ use printpdf::{Actions, Color, Pt, Rgb};
 use super::layout::{PageBuilder, Span};
 use crate::types::HighlightedLine;
 
+/// Renders a syntax-highlighted source file into the PDF, with a file header and optional link.
 #[allow(clippy::too_many_arguments)]
 pub fn render_file(
     builder: &mut PageBuilder,

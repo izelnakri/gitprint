@@ -12,6 +12,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ── Response types ─────────────────────────────────────────────────────────────
 
+/// GitHub user public profile returned by `GET /users/{username}`.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct GitHubUser {
     pub login: String,
@@ -28,6 +30,8 @@ pub struct GitHubUser {
     pub html_url: String,
 }
 
+/// A GitHub repository as returned by the repos and search APIs.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitHubRepo {
     pub name: String,
@@ -48,6 +52,8 @@ pub struct GitHubRepo {
     pub created_at: Option<String>,
 }
 
+/// A public GitHub event as returned by `GET /users/{username}/events/public`.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct GitHubEvent {
     #[serde(rename = "type")]
@@ -57,11 +63,15 @@ pub struct GitHubEvent {
     pub created_at: String,
 }
 
+/// The repository reference embedded in a GitHub event.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct EventRepo {
     pub name: String,
 }
 
+/// A single commit with its file patches, as returned by `GET /repos/{owner}/{repo}/commits/{sha}`.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct CommitDetail {
     pub sha: String,
@@ -71,18 +81,24 @@ pub struct CommitDetail {
     pub files: Vec<CommitFile>,
 }
 
+/// Commit metadata (message and author) embedded in a `CommitDetail`.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct CommitInfo {
     pub message: String,
     pub author: CommitAuthor,
 }
 
+/// Author name and date embedded in a `CommitInfo`.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct CommitAuthor {
     pub name: String,
     pub date: String,
 }
 
+/// A single changed file within a commit, including optional unified diff patch.
+#[allow(missing_docs)]
 #[derive(Debug, Deserialize)]
 pub struct CommitFile {
     pub filename: String,

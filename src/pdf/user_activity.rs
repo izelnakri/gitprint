@@ -3,6 +3,7 @@ use printpdf::{Actions, Color, Pt, Rgb};
 use super::layout::{PageBuilder, Span};
 use crate::github::GitHubEvent;
 
+/// Renders the "Recent Activity" section, grouping events by date with icons and links.
 pub fn render(
     builder: &mut PageBuilder,
     events: &[GitHubEvent],

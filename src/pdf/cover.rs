@@ -67,6 +67,7 @@ fn separator_line(width_pt: f32, font_size: f32) -> String {
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 
+/// Renders the repository cover page, including metadata table and footer.
 pub fn render(builder: &mut PageBuilder, metadata: &RepoMetadata, remote_url: Option<&str>) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();

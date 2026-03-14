@@ -6,18 +6,26 @@ use printpdf::{
 
 /// A styled text span within a line.
 pub struct Span {
+    /// The text content of this span.
     pub text: String,
+    /// The font to use for this span.
     pub font_id: FontId,
+    /// The font size in points.
     pub size: Pt,
+    /// The fill color for the text.
     pub color: Color,
 }
 
 /// Font set for the four standard variants.
 #[derive(Clone)]
 pub struct FontSet {
+    /// Regular (upright, normal weight) font handle.
     pub regular: FontId,
+    /// Bold (upright, bold weight) font handle.
     pub bold: FontId,
+    /// Italic (oblique, normal weight) font handle.
     pub italic: FontId,
+    /// Bold-italic font handle.
     pub bold_italic: FontId,
 }
 
@@ -40,6 +48,7 @@ pub struct PageBuilder {
 }
 
 impl PageBuilder {
+    /// Creates a new `PageBuilder` with the given page dimensions, margin, line height, and fonts.
     pub fn new(
         page_width: Mm,
         page_height: Mm,
@@ -136,6 +145,7 @@ impl PageBuilder {
         }
     }
 
+    /// Ensures at least `needed_pt` of vertical space remains on the current page, breaking if needed.
     pub fn ensure_space(&mut self, needed_pt: f32) {
         self.flush_break();
         if self.remaining() < needed_pt {
@@ -198,6 +208,7 @@ impl PageBuilder {
         self.pending_break = true;
     }
 
+    /// Writes a line of styled spans left-aligned at the current cursor position.
     pub fn write_line(&mut self, spans: &[Span]) {
         self.ensure_space(self.line_height);
 
@@ -230,10 +241,12 @@ impl PageBuilder {
         self.y += self.line_height;
     }
 
+    /// Advances the cursor downward by `pt` points without writing any content.
     pub fn vertical_space(&mut self, pt: f32) {
         self.y += pt;
     }
 
+    /// Writes a single string centered horizontally on the current line.
     pub fn write_centered(&mut self, text: &str, font_id: &FontId, size: Pt, color: Color) {
         self.ensure_space(size.0 + 4.0);
 
@@ -262,6 +275,7 @@ impl PageBuilder {
         self.y += size.0 + 4.0;
     }
 
+    /// Writes a line of styled spans centered horizontally on the page.
     pub fn write_line_centered(&mut self, spans: &[Span]) {
         self.ensure_space(self.line_height);
         let y = self.pdf_y();
@@ -296,6 +310,7 @@ impl PageBuilder {
         self.y += self.line_height;
     }
 
+    /// Writes two groups of spans: `left` aligned to the left margin and `right` to the right margin.
     pub fn write_line_justified(&mut self, left: &[Span], right: &[Span]) {
         self.ensure_space(self.line_height);
         let y = self.pdf_y();
@@ -468,6 +483,7 @@ impl PageBuilder {
         ]);
     }
 
+    /// Returns the appropriate `FontId` for the requested bold/italic combination.
     pub fn font(&self, bold: bool, italic: bool) -> &FontId {
         match (bold, italic) {
             (true, true) => &self.fonts.bold_italic,
@@ -477,6 +493,7 @@ impl PageBuilder {
         }
     }
 
+    /// Finalizes all pages and returns them; no trailing empty page is produced.
     pub fn finish(mut self) -> Vec<PdfPage> {
         if !self.current_ops.is_empty() {
             self.pages.push(PdfPage::new(

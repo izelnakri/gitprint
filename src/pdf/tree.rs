@@ -44,6 +44,7 @@ impl Tree {
     }
 }
 
+/// Renders a directory tree page showing all included file paths in box-drawing style.
 pub fn render(builder: &mut PageBuilder, paths: &[PathBuf]) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();

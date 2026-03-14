@@ -5,6 +5,7 @@ use printpdf::{Actions, Color, Pt, Rgb};
 use super::layout::{PageBuilder, Span};
 use crate::github::{GitHubEvent, GitHubRepo};
 
+/// Renders a titled section listing repositories with stats and recent activity context.
 pub fn render(
     builder: &mut PageBuilder,
     title: &str,

@@ -12,6 +12,7 @@ fn parse_font(bytes: &[u8], label: &str) -> anyhow::Result<ParsedFont> {
         .ok_or_else(|| anyhow::anyhow!("font loading failed: {label}: failed to parse font"))
 }
 
+/// Parses and registers all four JetBrains Mono variants into the PDF document.
 pub fn load_fonts(doc: &mut PdfDocument) -> anyhow::Result<FontSet> {
     let regular = parse_font(REGULAR, "regular")?;
     let bold = parse_font(BOLD, "bold")?;

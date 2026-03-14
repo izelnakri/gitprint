@@ -5,15 +5,27 @@
 //! The main entry point is [`run()`], which executes the full pipeline:
 //! git repository inspection, file filtering, syntax highlighting, and PDF generation.
 
+#![warn(missing_docs)]
+
+/// Command-line argument parsing via Clap.
 pub mod cli;
+/// Default glob patterns excluded from PDF output.
 pub mod defaults;
+/// Glob-based file filtering and binary/minified detection.
 pub mod filter;
+/// Git operations via subprocess.
 pub mod git;
+/// GitHub REST API v3 client.
 pub mod github;
+/// Syntax highlighting via syntect.
 pub mod highlight;
+/// PDF generation via printpdf.
 pub mod pdf;
+/// Terminal preview renderer.
 pub mod preview;
+/// Shared data types.
 pub mod types;
+/// GitHub user activity report pipeline.
 pub mod user_report;
 
 use std::path::{Path, PathBuf};

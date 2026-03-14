@@ -6,10 +6,15 @@ use super::layout::{PageBuilder, Span};
 
 /// A single entry in the Table of Contents.
 pub struct TocEntry {
+    /// Path to the file relative to the repository root.
     pub path: PathBuf,
+    /// Number of lines in the file.
     pub line_count: usize,
+    /// Human-readable file size (e.g. "4.2 KB").
     pub size_str: String,
+    /// Date the file was last modified (YYYY-MM-DD).
     pub last_modified: String,
+    /// PDF page number where this file's content begins.
     pub start_page: usize,
 }
 
@@ -32,6 +37,7 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     chunks
 }
 
+/// Renders the table of contents page with clickable internal links for each entry.
 pub fn render(builder: &mut PageBuilder, entries: &[TocEntry]) {
     let bold = builder.font(true, false).clone();
     let regular = builder.font(false, false).clone();

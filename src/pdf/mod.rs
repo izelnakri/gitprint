@@ -1,12 +1,22 @@
+/// Syntax-highlighted source code rendering.
 pub mod code;
+/// Repository cover page rendering.
 pub mod cover;
+/// Git diff / commit patch rendering.
 pub mod diff;
+/// Embedded JetBrains Mono font loading.
 pub mod fonts;
+/// Core page-layout engine (`PageBuilder`).
 pub mod layout;
+/// Table of contents rendering.
 pub mod toc;
+/// Directory tree visualization.
 pub mod tree;
+/// GitHub user activity feed rendering.
 pub mod user_activity;
+/// User report cover page rendering.
 pub mod user_cover;
+/// User repository list rendering.
 pub mod user_repos;
 
 use std::path::Path;
@@ -25,10 +35,12 @@ fn paper_dimensions(config: &Config) -> (Mm, Mm) {
     if config.landscape { (h, w) } else { (w, h) }
 }
 
+/// Creates a `PageBuilder` starting at page 1 for the given config and font set.
 pub fn create_builder(config: &Config, fonts: FontSet) -> PageBuilder {
     create_builder_at_page(config, fonts, 1)
 }
 
+/// Creates a `PageBuilder` starting at an arbitrary page number (used to continue page numbering).
 pub fn create_builder_at_page(
     config: &Config,
     fonts: FontSet,
@@ -39,10 +51,12 @@ pub fn create_builder_at_page(
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
 }
 
+/// Creates a `PageBuilder` for a user report starting at page 1.
 pub fn create_user_builder(config: &UserReportConfig, fonts: FontSet) -> PageBuilder {
     create_user_builder_at_page(config, fonts, 1)
 }
 
+/// Creates a `PageBuilder` for a user report starting at an arbitrary page number.
 pub fn create_user_builder_at_page(
     config: &UserReportConfig,
     fonts: FontSet,
@@ -58,6 +72,7 @@ pub fn create_user_builder_at_page(
     PageBuilder::new(w, h, Mm(10.0), line_height, fonts, starting_page)
 }
 
+/// Serializes a `PdfDocument` to bytes and writes it to `path` asynchronously.
 pub async fn save_pdf(doc: &PdfDocument, path: &Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
